@@ -27,6 +27,7 @@ public sealed class Critter
     private readonly double _bodySpeed;
     private readonly double _bankAmount;
     private readonly double _maxTurnRate;
+    private readonly double _edgePadding;
 
     private double _phase;
     private double _bank;
@@ -36,7 +37,7 @@ public sealed class Critter
     public double HalfHeight { get; }
 
     public Critter(CreatureProgram program, int points, double targetLength, double bodySpeed,
-        IMotion motion, double bankAmount, double maxTurnRate,
+        IMotion motion, double bankAmount, double maxTurnRate, double edgePadding,
         IReadOnlyDictionary<string, double>? paramOverrides, int seed)
     {
         _program = program;
@@ -45,6 +46,7 @@ public sealed class Critter
         _motion = motion;
         _bankAmount = bankAmount;
         _maxTurnRate = Math.Max(0.01, maxTurnRate);
+        _edgePadding = Math.Max(0, edgePadding);
 
         _registers = program.NewRegisters(_points);
 
@@ -68,18 +70,28 @@ public sealed class Critter
         HalfWidth = halfW * _scale;
         HalfHeight = halfH * _scale;
 
+        // The creature rotates freely, so the circumscribed radius is what has to
+        // clear the edge -- using just the half-length would let the tail hang off
+        // whenever the fish is swimming diagonally.
+        Radius = Math.Sqrt(HalfWidth * HalfWidth + HalfHeight * HalfHeight) * _edgePadding;
+
         // Offset the body cycle so a school of fish does not beat in lockstep.
         _phase = Noise.At(seed * 5.17 + 0.3) * Math.Tau;
     }
 
-    public void Reset(double width, double height) => _motion.Reset(width, height, _pose);
+    /// <summary>Distance from the creature's centre that must stay inside the sandbox.</summary>
+    public double Radius { get; }
+
+    private Bounds BoundsFor(double width, double height) => Bounds.Inset(width, height, Radius);
+
+    public void Reset(double width, double height) => _motion.Reset(BoundsFor(width, height), _pose);
 
     public void Step(double dt, double width, double height)
     {
         _phase += _program.BodyRate * _bodySpeed * dt;
         if (_phase > 1e6) _phase %= Math.Tau;   // keep float precision from degrading over days
 
-        _motion.Step(dt, width, height, _pose);
+        _motion.Step(dt, BoundsFor(width, height), _pose);
 
         // Ease into the bank so direction changes read as a lean, not a snap.
         double target = Math.Clamp(_pose.TurnRate / _maxTurnRate, -1, 1) * _bankAmount;

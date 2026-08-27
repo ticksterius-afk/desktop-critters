@@ -280,20 +280,61 @@ internal sealed class LayeredWindow : IDisposable
         _needFullPresent = true;
     }
 
-    /// <summary>Re-asserts z-order. Explorer restarts and display changes can shuffle us.</summary>
+    /// <summary>
+    /// Forces the next present to push the entire surface rather than a dirty rectangle.
+    ///
+    /// A layered *child* window's pixels live in its parent's redirection surface, so a
+    /// full repaint of the desktop -- toggling icons, changing wallpaper, Explorer
+    /// restarting -- can erase them. Ordinary frames only re-blit the small rectangle
+    /// around the creature, which is not enough to heal that; and while the widget is
+    /// paused nothing re-blits at all. Calling this on a slow heartbeat restores the
+    /// creature within a couple of seconds of any such repaint.
+    /// </summary>
+    public void Refresh()
+    {
+        if (_dib == IntPtr.Zero) return;
+        _needFullPresent = true;
+        Present(default);
+    }
+
+    /// <summary>
+    /// Re-checks that we are still attached to the right window and still above the
+    /// icon view. Explorer restarts, wallpaper apps, and display changes can all move
+    /// the wallpaper host out from under us.
+    /// </summary>
     public void ReassertZOrder(LayerMode mode)
     {
-        if (mode == LayerMode.Desktop)
+        if (mode != LayerMode.Desktop)
         {
-            if (_parent != IntPtr.Zero && Win32.IsWindow(_parent))
-                return;
+            var target = mode == LayerMode.Topmost ? Win32.HWND_TOPMOST : Win32.HWND_BOTTOM;
+            Win32.SetWindowPos(Handle, target, 0, 0, 0, 0,
+                Win32.SWP_NOMOVE | Win32.SWP_NOSIZE | Win32.SWP_NOACTIVATE);
+            return;
+        }
+
+        // Has the shell handed wallpaper duty to a different window since we attached?
+        var host = DesktopLayer.FindWallpaperHost(spawnWorkerW: false);
+        if (host.Handle != IntPtr.Zero && host.Handle != _parent)
+        {
+            Console.Error.WriteLine($"[critters] wallpaper host changed -> {host.Description}; re-attaching");
             Attach(mode, _screenX, _screenY, Width, Height);
             return;
         }
 
-        var after = mode == LayerMode.Topmost ? Win32.HWND_TOPMOST : Win32.HWND_BOTTOM;
-        Win32.SetWindowPos(Handle, after, 0, 0, 0, 0,
-            Win32.SWP_NOMOVE | Win32.SWP_NOSIZE | Win32.SWP_NOACTIVATE);
+        if (_parent == IntPtr.Zero || !Win32.IsWindow(_parent))
+        {
+            Attach(mode, _screenX, _screenY, Width, Height);
+            return;
+        }
+
+        // Stay above SHELLDLL_DefView. Only reorder when we are not already on top,
+        // because SetWindowPos on the desktop forces a repaint.
+        if (Win32.GetTopWindow(_parent) != Handle)
+        {
+            Win32.SetWindowPos(Handle, Win32.HWND_TOP, 0, 0, 0, 0,
+                Win32.SWP_NOMOVE | Win32.SWP_NOSIZE | Win32.SWP_NOACTIVATE);
+            _needFullPresent = true;
+        }
     }
 
     private void ReleaseSurface()
@@ -316,8 +357,18 @@ internal sealed class LayeredWindow : IDisposable
     public void Dispose()
     {
         ReleaseSurface();
+
         if (Handle != IntPtr.Zero)
         {
+            // Detach from Explorer's window before destroying, so a shutdown can never
+            // leave a stale child hanging in the desktop's tree.
+            if (_parent != IntPtr.Zero)
+            {
+                Win32.ShowWindow(Handle, Win32.SW_HIDE);
+                Win32.SetParent(Handle, IntPtr.Zero);
+                _parent = IntPtr.Zero;
+            }
+
             Win32.DestroyWindow(Handle);
             Handle = IntPtr.Zero;
         }

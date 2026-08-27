@@ -49,21 +49,26 @@ def half(w, h, rows):
         out.append(row)
     return hw, hh, out
 
-frames = sys.argv[2:]
-cols = int(os.environ.get('COLS', '3'))
-tiles = []
-for f in frames:
-    w, h, rows = read_png(f)
-    tiles.append(half(w, h, rows))
+def main():
+    frames = sys.argv[2:]
+    cols = int(os.environ.get('COLS', '3'))
+    tiles = []
+    for f in frames:
+        w, h, rows = read_png(f)
+        tiles.append(half(w, h, rows))
 
-tw, th = tiles[0][0], tiles[0][1]
-rowsN = (len(tiles) + cols - 1) // cols
-W, H = tw * cols, th * rowsN
-canvas = [bytearray(W * 4) for _ in range(H)]
-for i, (w, h, rows) in enumerate(tiles):
-    ox, oy = (i % cols) * tw, (i // cols) * th
-    for y in range(h):
-        canvas[oy+y][ox*4 : ox*4 + w*4] = rows[y]
+    tw, th = tiles[0][0], tiles[0][1]
+    rowsN = (len(tiles) + cols - 1) // cols
+    W, H = tw * cols, th * rowsN
+    canvas = [bytearray(W * 4) for _ in range(H)]
+    for i, (w, h, rows) in enumerate(tiles):
+        ox, oy = (i % cols) * tw, (i // cols) * th
+        for y in range(h):
+            canvas[oy+y][ox*4 : ox*4 + w*4] = rows[y]
 
-write_png(sys.argv[1], W, H, canvas)
-print(f'{sys.argv[1]} {W}x{H} from {len(tiles)} frames')
+    write_png(sys.argv[1], W, H, canvas)
+    print(f'{sys.argv[1]} {W}x{H} from {len(tiles)} frames')
+
+
+if __name__ == "__main__":
+    main()

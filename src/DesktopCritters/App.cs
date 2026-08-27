@@ -46,6 +46,7 @@ internal sealed class App : IDisposable
     private bool _running = true;
     private bool _paused;
     private volatile bool _reloadRequested;
+    private volatile bool _relayoutRequested;
     private long _reloadDueTicks;
     private long _nextTickErrorTicks;
 
@@ -187,6 +188,35 @@ internal sealed class App : IDisposable
         }
     }
 
+    /// <summary>
+    /// Re-reads the screen geometry without touching the population. Only when the
+    /// sandbox has actually changed size does the world get rebuilt, so a stray
+    /// WM_SETTINGCHANGE costs one rectangle comparison instead of a restart.
+    /// </summary>
+    private void Relayout()
+    {
+        var sandbox = ComputeSandbox(_config.Sandbox);
+
+        bool moved = sandbox.Left != _sandbox.Left || sandbox.Top != _sandbox.Top;
+        bool resized = sandbox.Width != _sandbox.Width || sandbox.Height != _sandbox.Height;
+
+        if (resized)
+        {
+            Log($"screen geometry changed to {sandbox.Width}x{sandbox.Height}; rebuilding");
+            ApplyConfig(rebuildWorld: true);
+            return;
+        }
+
+        if (moved)
+        {
+            _sandbox = sandbox;
+            _surface?.MoveTo(sandbox.Left, sandbox.Top, sandbox.Width, sandbox.Height);
+        }
+
+        _surface?.ReassertZOrder(_layer);
+        _surface?.Refresh();
+    }
+
     private void Reload()
     {
         _reloadRequested = false;
@@ -233,8 +263,13 @@ internal sealed class App : IDisposable
 
             case Win32.WM_DISPLAYCHANGE:
             case Win32.WM_SETTINGCHANGE:
-                // Resolution, DPI, or taskbar changes move the work area under us.
-                _reloadRequested = true;
+                // Resolution, DPI, taskbar and desktop-icon changes all either move the
+                // work area or repaint the desktop under us. Windows broadcasts
+                // WM_SETTINGCHANGE liberally, so relayout rather than reload: rebuilding
+                // the world here would restart the creature from a new position every
+                // time the user changed a theme setting.
+                _relayoutRequested = true;
+                try { _surface?.Refresh(); } catch { /* the heartbeat will retry */ }
                 return IntPtr.Zero;
 
             case Win32.WM_DESTROY:
@@ -335,25 +370,17 @@ internal sealed class App : IDisposable
         long frequency = Stopwatch.Frequency;
         long lastTick = Stopwatch.GetTimestamp();
         long nextFrame = lastTick;
-        int zOrderCountdown = 0;
+        long nextRefresh = lastTick;
 
         while (_running)
         {
             int fps = Math.Clamp(_config.Fps, 1, 240);
             long frameTicks = frequency / fps;
+            long refreshTicks = _config.RefreshSeconds > 0
+                ? (long)(frequency * Math.Clamp(_config.RefreshSeconds, 0.25, 3600))
+                : 0;
 
-            bool idle = _paused || (_config.PauseWhenFullscreen && DesktopLayer.DesktopIsObscured());
             long now = Stopwatch.GetTimestamp();
-
-            // While idle, wake ten times a second just to notice the state changing.
-            long waitTicks = idle ? frequency / 10 : nextFrame - now;
-
-            if (waitTicks > frequency / 2000)   // anything under ~0.5ms is not worth sleeping for
-            {
-                WaitFor(handles, handleCount, timer, waitTicks, frequency);
-                PumpMessages();
-                continue;
-            }
 
             PumpMessages();
             if (!_running) break;
@@ -376,41 +403,78 @@ internal sealed class App : IDisposable
                 continue;
             }
 
+            // Heal the surface on a slow heartbeat. This runs whether or not we are
+            // animating, which is the point: a desktop repaint (hiding icons, changing
+            // wallpaper, Explorer restarting) can wipe a layered child's pixels, and a
+            // paused widget would otherwise never paint them back.
+            if (refreshTicks > 0 && now >= nextRefresh)
+            {
+                nextRefresh = now + refreshTicks;
+                try
+                {
+                    _surface?.ReassertZOrder(_layer);
+                    _surface?.Refresh();
+                }
+                catch (Exception ex)
+                {
+                    Log($"surface refresh failed: {ex.Message}");
+                }
+            }
+
+            if (_relayoutRequested)
+            {
+                _relayoutRequested = false;
+                try
+                {
+                    Relayout();
+                }
+                catch (Exception ex)
+                {
+                    Log($"relayout failed: {ex.Message}");
+                }
+            }
+
+            bool idle = _paused || (_config.PauseWhenFullscreen && DesktopLayer.DesktopIsObscured());
+
             if (idle)
             {
                 lastTick = now;
                 nextFrame = now;
-                continue;
             }
-
-            double dt = (now - lastTick) / (double)frequency;
-            lastTick = now;
-
-            try
+            else if (now >= nextFrame)
             {
-                Tick(dt);
-            }
-            catch (Exception ex)
-            {
-                // One bad frame should never end the session; log once per minute
-                // at most so a persistent fault does not flood the log.
-                if (now >= _nextTickErrorTicks)
+                double dt = (now - lastTick) / (double)frequency;
+                lastTick = now;
+
+                try
                 {
-                    _nextTickErrorTicks = now + frequency * 60;
-                    Log($"frame failed: {ex}");
+                    Tick(dt);
                 }
+                catch (Exception ex)
+                {
+                    // One bad frame should never end the session; log at most once a
+                    // minute so a persistent fault does not flood the log.
+                    if (now >= _nextTickErrorTicks)
+                    {
+                        _nextTickErrorTicks = now + frequency * 60;
+                        Log($"frame failed: {ex}");
+                    }
+                }
+
+                nextFrame += frameTicks;
+                if (nextFrame < now - frameTicks * 3)
+                    nextFrame = now + frameTicks;   // resync after a stall rather than catching up in a burst
             }
 
-            nextFrame += frameTicks;
-            if (nextFrame < now - frameTicks * 3)
-                nextFrame = now + frameTicks;   // resync after a stall instead of catching up in a burst
+            // Sleep until whichever comes first: the next frame, the next heal, or a
+            // lazy tick while idle.
+            long wakeAt = idle ? now + frequency / 5 : nextFrame;
+            if (refreshTicks > 0 && nextRefresh < wakeAt)
+                wakeAt = nextRefresh;
 
-            // Explorer restarts and full-screen apps can shuffle us out of place.
-            if (--zOrderCountdown <= 0)
-            {
-                zOrderCountdown = fps * 5;
-                _surface?.ReassertZOrder(_layer);
-            }
+            long waitTicks = wakeAt - Stopwatch.GetTimestamp();
+            if (waitTicks > frequency / 2000)   // anything under ~0.5ms is not worth sleeping for
+                WaitFor(handles, handleCount, timer, waitTicks, frequency);
         }
 
         if (timer != IntPtr.Zero)

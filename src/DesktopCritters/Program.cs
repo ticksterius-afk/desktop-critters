@@ -40,9 +40,21 @@ internal static class Program
             Paths.EnsureSeeded();
             string configPath = options.ConfigPath ?? Paths.ConfigFile;
 
-            return options.PreviewDirectory is not null
-                ? Preview.Run(configPath, options)
-                : new App(configPath, options.Layer).Run();
+            if (options.PreviewDirectory is not null)
+                return Preview.Run(configPath, options);   // headless, no window to duplicate
+
+            // One widget per session. Without this, every launch adds another critter
+            // to the desktop and they accumulate invisibly across restarts.
+            using var single = new Mutex(initiallyOwned: true, @"Local\DesktopCritters.SingleInstance", out bool isFirst);
+            if (!isFirst)
+            {
+                Console.Error.WriteLine(
+                    "Desktop Critters is already running - look for the fish in the notification area. " +
+                    "Use its Exit item first if you want to restart it.");
+                return 3;
+            }
+
+            return new App(configPath, options.Layer).Run();
         }
         catch (Exception ex)
         {

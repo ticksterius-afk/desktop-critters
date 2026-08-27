@@ -87,6 +87,7 @@ public sealed class World
                         MotionFactory.Create(spec.Motion, seed),
                         spec.Motion.Bank,
                         spec.Motion.TurnRate,
+                        spec.Motion.EdgePadding,
                         spec.Params,
                         seed);
 

@@ -38,7 +38,12 @@ internal static class DesktopLayer
     /// if the shell is not in a state we recognise (in which case the caller
     /// should fall back to <see cref="LayerMode.Bottom"/>).
     /// </summary>
-    public static Host FindWallpaperHost()
+    /// <param name="spawnWorkerW">
+    /// Whether to poke Explorer into creating the wallpaper WorkerW. True on startup;
+    /// false for the periodic re-check, so we are not messaging the shell every couple
+    /// of seconds forever.
+    /// </param>
+    public static Host FindWallpaperHost(bool spawnWorkerW = true)
     {
         var progman = Win32.FindWindow("Progman", null);
         if (progman == IntPtr.Zero)
@@ -46,8 +51,9 @@ internal static class DesktopLayer
 
         // Nudge Explorer into creating the wallpaper WorkerW. Timeout rather than
         // block: a wedged Explorer must not wedge the widget's startup.
-        Win32.SendMessageTimeout(progman, WM_SPAWN_WORKERW, IntPtr.Zero, IntPtr.Zero,
-            Win32.SMTO_NORMAL, 1000, out _);
+        if (spawnWorkerW)
+            Win32.SendMessageTimeout(progman, WM_SPAWN_WORKERW, IntPtr.Zero, IntPtr.Zero,
+                Win32.SMTO_NORMAL, 1000, out _);
 
         var worker = FindWorkerWBehindIcons();
         if (worker != IntPtr.Zero)

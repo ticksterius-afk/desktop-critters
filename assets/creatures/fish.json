@@ -7,6 +7,12 @@
   "facing": 0,
 
   "params": {
+    // Splits the point cloud into two interleaved sheets offset by this many radians
+    // of phase. The original sketch uses 8, which throws the two sheets far enough
+    // apart that they read as two separate fish. 0 keeps every point on one surface:
+    // a single, denser animal.
+    "sheetOffset": 0.0,
+
     "bodyTurn": 0.25,
     "wobble": 1.0,
     "sweep": 1.0,
@@ -25,7 +31,7 @@
     { "name": "ripple", "expr": "3 * sin(k * 2)" },
     { "name": "flank", "expr": "sin(y / 9 + 6) * k * (e + sin(e * 4 - d * 4))" },
 
-    { "name": "c", "expr": "d / 2.5 - t / 2 * bodyTurn + (i % 2) * 8" }
+    { "name": "c", "expr": "d / 2.5 - t / 2 * bodyTurn + (i % 2) * sheetOffset" }
   ],
 
   "px": "radius * cos(c)",

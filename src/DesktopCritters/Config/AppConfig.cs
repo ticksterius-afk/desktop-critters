@@ -56,8 +56,27 @@ public sealed class MotionConfig
     /// <summary>Strength of the random heading drift.</summary>
     public double WanderAmount { get; set; } = 0.9;
 
+    /// <summary>
+    /// How hard the creature corrects towards open water, per radian of heading
+    /// error, per second. Higher turns away from edges more decisively.
+    /// </summary>
+    public double SteerGain { get; set; } = 3.0;
+
+    /// <summary>
+    /// Multiplier on the body radius kept clear of the sandbox edge. 1.0 keeps the
+    /// whole creature on screen; below 1.0 lets it clip out at the edges.
+    /// </summary>
+    public double EdgePadding { get; set; } = 1.0;
+
+    /// <summary>
+    /// How strongly the heading is pulled back towards horizontal, per radian of tilt,
+    /// per second. Fish swim level far more than they swim straight up, and without
+    /// this a pure random walk spends too much time nose-up or nose-down. 0 disables.
+    /// </summary>
+    public double LevelBias { get; set; } = 0.7;
+
     /// <summary>Distance from a sandbox edge at which the creature starts turning away.</summary>
-    public double Margin { get; set; } = 150;
+    public double Margin { get; set; } = 220;
 
     /// <summary>How hard edges push. Raise it if a creature keeps nosing into corners.</summary>
     public double AvoidStrength { get; set; } = 2.4;
@@ -109,8 +128,8 @@ public sealed class CritterConfig
 
 public sealed class AppConfig
 {
-    /// <summary>Target frames per second. 30 looks smooth for drifting creatures.</summary>
-    public int Fps { get; set; } = 30;
+    /// <summary>Target frames per second.</summary>
+    public int Fps { get; set; } = 60;
 
     /// <summary>desktop | bottom | topmost</summary>
     public string Layer { get; set; } = "desktop";
@@ -120,6 +139,15 @@ public sealed class AppConfig
 
     /// <summary>Re-read this file automatically when it changes on disk.</summary>
     public bool WatchConfig { get; set; } = true;
+
+    /// <summary>
+    /// How often (seconds) to re-push the whole surface and re-check that we are still
+    /// attached above the wallpaper. Repaints of the desktop -- toggling icons, changing
+    /// wallpaper, Explorer restarting -- can erase a layered child's pixels, and normal
+    /// frames only repaint the small rectangle around the creature. This heals that,
+    /// and runs even while paused. Set to 0 to disable.
+    /// </summary>
+    public double RefreshSeconds { get; set; } = 2.0;
 
     public SandboxConfig Sandbox { get; set; } = new();
     public RenderConfig Render { get; set; } = new();

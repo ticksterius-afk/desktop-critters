@@ -16,7 +16,7 @@ this, and nothing else:
   { "name": "k",      "expr": "(4 + cos(y)) * cos(i)" },
   { "name": "e",      "expr": "y / 5 - 11" },
   { "name": "d",      "expr": "mag(k, e) - 5" },
-  { "name": "c",      "expr": "d / 2.5 - t / 2 * bodyTurn + (i % 2) * 8" }
+  { "name": "c",      "expr": "d / 2.5 - t / 2 * bodyTurn + (i % 2) * sheetOffset" }
 ],
 "px": "radius * cos(c)",
 "py": "99 * sin(c / 3) + dd * sin(t * 2 - d) * sweep + ripple + flank * wobble"
@@ -39,6 +39,10 @@ dotnet build src/DesktopCritters/DesktopCritters.csproj -c Release
 A fish icon appears in the notification area. Right-click it for pause, layer, reload,
 and exit. The widget is click-through, so the tray icon is the only thing you can
 actually click.
+
+Only one instance runs at a time - a second launch refuses and exits, so repeated
+launches can never stack extra fish onto the desktop. Quit from the tray before
+restarting it.
 
 On first run it writes its editable files to `%APPDATA%\DesktopCritters\`:
 
@@ -93,8 +97,21 @@ failure this project set out to avoid. Desktop Critters therefore parents itself
 `WorkerW`, or to `Progman` when the shell has no separate `WorkerW` (common on current
 Windows 11), and never to the icon view.
 
-Verified on Windows 11 26200 with desktop icons *off*: the surface is a visible child
-of `Progman`, sitting above the wallpaper, while `SysListView32` is hidden.
+Verified on Windows 11 26200 by toggling desktop icons with the widget running: the
+surface stays a visible child of `Progman`, and stays the *topmost* child, in both
+states.
+
+There is a second half to staying visible. A layered **child** window's pixels live in
+its parent's redirection surface, so a full repaint of the desktop -- toggling icons,
+changing wallpaper, Explorer restarting -- can erase them. Ordinary frames only re-blit
+the small rectangle around the creature, which is not enough to heal that, and a
+*paused* widget never re-blits at all. So the widget re-pushes the entire surface on a
+slow heartbeat (`refreshSeconds`, default 2s) that runs even while paused, and
+immediately on `WM_SETTINGCHANGE` / `WM_DISPLAYCHANGE`. Anything that wipes the
+creature gets painted back within a couple of seconds.
+
+On exit the surface is un-parented before it is destroyed, so shutting down never
+leaves a stale window behind in Explorer's tree.
 
 Three layers are available from the tray, or via `"layer"` in config:
 
@@ -110,10 +127,11 @@ Three layers are available from the tray, or via `"layer"` in config:
 
 ```jsonc
 {
-  "fps": 30,
+  "fps": 60,
   "layer": "desktop",             // desktop | bottom | topmost
   "pauseWhenFullscreen": true,    // idle while a fullscreen app covers the screen
   "watchConfig": true,
+  "refreshSeconds": 2.0,          // re-push the whole surface this often; heals desktop repaints
 
   "sandbox": {                    // the patch of desktop the creature stays inside
     "mode": "workArea",           // workArea | monitor | virtual | rect
@@ -146,8 +164,11 @@ Three layers are available from the tray, or via `"layer"` in config:
         "turnRate": 1.1,          // max radians per second
         "wanderFreq": 0.18,       // lower is lazier
         "wanderAmount": 0.9,
-        "margin": 150,            // distance from an edge at which it turns away
+        "levelBias": 0.7,         // pull back towards horizontal; 0 = swims at any angle
+        "margin": 220,            // distance from an edge at which it starts turning
+        "steerGain": 3.0,         // how decisively it corrects away from an edge
         "avoidStrength": 2.4,
+        "edgePadding": 1.0,       // body radius kept clear of the edge; <1 lets it clip out
         "bank": 0.35,             // extra lean proportional to turn rate
         "bobAmount": 7, "bobFreq": 0.27
       }
@@ -158,11 +179,25 @@ Three layers are available from the tray, or via `"layer"` in config:
 
 ### Motion modes
 
-**`wander`** (default) is steering-based: a slow noise field nudges the heading, the
-sandbox edges push back, and the turn rate is capped so the creature banks through
-corners instead of pivoting on the spot. This is the one that reads as *alive* —
-a closed-form path eventually looks like a closed-form path, whereas bounded noise
-never repeats.
+**`wander`** (default) is steering-based, in three layers of increasing authority:
+
+1. a slow noise field nudges the heading, so the path never repeats;
+2. proportional steering (`steerGain`) turns the creature inward once it enters the
+   `margin` band, and `levelBias` pulls the heading back towards horizontal — fish
+   swim level far more than they swim straight up, and without it a pure random walk
+   spends too much of its time nose-up;
+3. a hard reflection at the boundary *guarantees* it turns around rather than grinding
+   along an edge, even after a huge time step.
+
+The noise and the levelling are both damped as the creature nears a wall, so neither
+can fight the turn away from it — that was the flaw in the naive "add avoidance on top
+of wander" approach.
+
+The boundary is the sandbox inset by the creature's own **circumscribed radius**, not
+its half-length: the body rotates freely, so a half-length inset would let the tail
+hang off screen whenever the fish was swimming diagonally. The whole animal therefore
+stays inside the sandbox at every angle — verified over 40 frames of wandering, with
+zero lit pixels in the outermost 2px band.
 
 **`path`** follows two formulas in sandbox-normalised coordinates, with `u` running
 0→1 over `period` seconds. Heading comes from a finite difference of the curve, so the
@@ -291,12 +326,17 @@ python tools/montage.py sheet.png out/frame000.png out/frame004.png out/frame008
 
 ## Performance
 
-Measured on Windows 11, one fish, 20 000 points, 30 fps, single thread:
+Measured on Windows 11, one fish, 20 000 points, single thread:
 
-| sandbox | layer | CPU | working set |
-|---|---|---|---|
-| 700 × 500 | topmost | 7.3% of one core | 37 MB |
-| 2560 × 1392 (full work area) | desktop | 7.3% of one core | 65 MB |
+| sandbox | layer | fps | CPU | working set |
+|---|---|---|---|---|
+| 700 × 500 | topmost | 30 | 7.3% of one core | 37 MB |
+| 2560 × 1392 (full work area) | desktop | 30 | 7.3% of one core | 65 MB |
+| 2560 × 1392 (full work area) | desktop | **60** | 11.1% of one core | 65 MB |
+
+At 60 fps the per-frame formula dominates. If you want it cheaper, `points` is the
+strongest dial: halving it to 10 000 roughly halves the CPU and the fish only looks
+slightly less dense.
 
 A full-screen sandbox costs the same CPU as a small one because presents use a dirty
 rectangle — the blit scales with the fish, not the sandbox. Only memory grows, since
@@ -320,6 +360,11 @@ the repo carries no binary assets.
   the fish a full revolution per cycle, which fights being steered somewhere. The
   `bodyTurn` parameter damps this; `0.25` holds a heading while still looking alive,
   and `1.0` restores the original's endless circling.
+- **The original formula draws two fish, not one.** Its `(i % 2) * 8` term splits the
+  cloud into two sheets offset by 8 radians of phase -- far enough apart that they read
+  as two separate animals rather than one body with volume. `sheetOffset` controls it
+  and now defaults to `0`: every point on one surface, a single denser fish. Set it
+  back to `8` for the original.
 - **`points` changes density, not length.** The original hard-coded `i/663` against
   exactly 20 000 points; dividing by `n` instead keeps the shape identical there while
   making the point count a quality dial.

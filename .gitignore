@@ -8,3 +8,4 @@ preview/
 pv-*/
 ref-frames*/
 opt-frames*/
+__pycache__/
