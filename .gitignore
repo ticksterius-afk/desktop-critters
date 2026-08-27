@@ -1,0 +1,10 @@
+bin/
+obj/
+*.user
+*.suo
+.vs/
+artifacts/
+preview/
+pv-*/
+ref-frames*/
+opt-frames*/
