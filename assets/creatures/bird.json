@@ -1,0 +1,77 @@
+{
+  "name": "bird",
+  "description": "A bird seen from above, gliding and flapping. Unlike the fish this one is built from scratch rather than ported: `s` runs wingtip to wingtip and `q` scatters points across the chord, so the whole animal is one elliptical wing planform with a body blended into the middle.",
+
+  "points": 16000,
+
+  // Radians of flap phase per second. ~0.8s per wingbeat at flapRate 1.
+  "bodyRate": 8.0,
+
+  // Local +X is already the beak.
+  "facing": 0,
+
+  // A bird's wingspan is several times its body length, so "size" in config
+  // means the span here, not the nose-to-tail length a fish uses.
+  "sizeAxis": "span",
+
+  "params": {
+    // Half-wingspan and half-chord, in the formula's own units.
+    "span": 100,
+    "chord": 15,
+
+    // How far the wingtips trail behind the shoulders.
+    "sweep": 24,
+
+    // Peak dihedral angle of the wingtips, in radians, and its rate multiplier.
+    "flapAmp": 1.05,
+    "flapRate": 1.0,
+
+    // Real birds sweep the wings forward on the downstroke; this sells the motion
+    // in a top-down view, where pure vertical flapping would be invisible.
+    "flapSwing": 14,
+
+    // Body spindle: how far out from the centreline it reaches, and how far the
+    // tail and head stick out beyond the wing chord.
+    "bodyWidth": 0.13,
+    "tailLen": 42,
+    "headLen": 16
+  },
+
+  "vars": [
+    { "name": "u", "expr": "(i + 1) / n" },
+
+    // Spanwise station: -1 at the left wingtip, +1 at the right.
+    { "name": "s", "expr": "u * 2 - 1" },
+    { "name": "as", "expr": "abs(s)" },
+
+    // cos(i) over integer i scatters points across the chord instead of leaving
+    // them on a single line. -1 is the trailing edge, +1 the leading edge.
+    { "name": "q", "expr": "cos(i)" },
+
+    // Planform. A plain ellipse peaks at the centreline, which puts the widest chord
+    // on the body and reads as a moth; this holds the chord flat through the mid-wing
+    // and drops it sharply at the tip instead.
+    { "name": "wing", "expr": "pow(max(0, 1 - pow(as, 3)), 0.5)" },
+    { "name": "ch", "expr": "chord * wing" },
+
+    // Wingtips trail behind the shoulders.
+    { "name": "lead", "expr": "-sweep * as * as" },
+
+    // 1 along the centreline, fading to 0 by bodyWidth. Gates the head and tail.
+    { "name": "body", "expr": "smoothstep(bodyWidth, 0, as)" },
+
+    // Dihedral angle. The tips travel much further than the shoulders, hence the
+    // exponent; a linear ramp makes the wings look hinged rather than flexible.
+    { "name": "flap", "expr": "flapAmp * sin(t * flapRate) * pow(as, 1.4)" },
+
+    // Seen from above, a raised wing is foreshortened. This is also what makes the
+    // wings brighten as they rise: the same points crowd into fewer pixels, and the
+    // density renderer turns that into opacity for free.
+    { "name": "fore", "expr": "cos(flap)" }
+  ],
+
+  "px": "lead + q * ch + flapSwing * sin(flap) * as - body * tailLen * max(0, -q) + body * headLen * max(0, q)",
+  "py": "s * span * fore",
+
+  "weight": "0.55 + 0.45 * wing"
+}

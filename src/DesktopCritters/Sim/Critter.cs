@@ -66,7 +66,8 @@ public sealed class Critter
 
         // Scale from the creature's own units to the requested on-screen length.
         var (halfW, halfH) = program.MeasureExtent(_registers, _cache, _points);
-        _scale = targetLength / Math.Max(1e-6, halfW * 2.0);
+        double reference = program.ReferenceHalfExtent(halfW, halfH);
+        _scale = targetLength / Math.Max(1e-6, reference * 2.0);
         HalfWidth = halfW * _scale;
         HalfHeight = halfH * _scale;
 

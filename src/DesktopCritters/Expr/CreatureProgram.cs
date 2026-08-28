@@ -29,6 +29,9 @@ public sealed class CreatureFormula
     /// <summary>Degrees to rotate local space so that +X points the way the creature swims.</summary>
     public double Facing { get; init; }
 
+    /// <summary>Which extent the configured <c>size</c> measures: forward | span | max.</summary>
+    public string SizeAxis { get; init; } = "forward";
+
     public IReadOnlyDictionary<string, double> Params { get; init; } = new Dictionary<string, double>();
 }
 
@@ -67,6 +70,13 @@ public sealed class CreatureProgram
     public double FacingRadians { get; }
     public int DefaultPoints { get; }
 
+    /// <summary>
+    /// Which measured extent the configured <c>size</c> refers to. A fish is longest
+    /// along the way it swims, but a bird's wingspan is several times its body length,
+    /// so "300 pixels" has to mean different axes for the two.
+    /// </summary>
+    public string SizeAxis { get; }
+
     /// <summary>How many time-invariant values are cached per point.</summary>
     public int CachedPerPoint { get; }
 
@@ -87,8 +97,9 @@ public sealed class CreatureProgram
         Dictionary<string, int> paramSlots,
         IReadOnlyDictionary<string, double> defaults,
         double bodyRate, double facingDegrees, int defaultPoints,
-        List<string> cachedNames)
+        List<string> cachedNames, string sizeAxis)
     {
+        SizeAxis = sizeAxis;
         Name = name;
         _runStatic = runStatic;
         _runDynamic = runDynamic;
@@ -170,7 +181,7 @@ public sealed class CreatureProgram
 
         return new CreatureProgram(
             formula.Name, runStatic, runDynamic, nextSlot, paramSlots, formula.Params,
-            formula.BodyRate, formula.Facing, formula.Points, cached);
+            formula.BodyRate, formula.Facing, formula.Points, cached, formula.SizeAxis);
     }
 
     /// <summary>
@@ -332,6 +343,14 @@ public sealed class CreatureProgram
         registers[RegTime] = time;
         _runDynamic(registers, cache, index * CachedPerPoint);
     }
+
+    /// <summary>Picks the half-extent that <c>size</c> is measured against.</summary>
+    public double ReferenceHalfExtent(double halfWidth, double halfHeight) => SizeAxis.ToLowerInvariant() switch
+    {
+        "span" or "y" => halfHeight,
+        "max" or "largest" => Math.Max(halfWidth, halfHeight),
+        _ => halfWidth,
+    };
 
     /// <summary>
     /// Samples the point cloud across a full body cycle to find its local extent.

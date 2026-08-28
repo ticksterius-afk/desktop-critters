@@ -50,7 +50,8 @@ On first run it writes its editable files to `%APPDATA%\DesktopCritters\`:
 %APPDATA%\DesktopCritters\
 ├─ config.json            speed, colour, sandbox, layer, fps
 └─ creatures\
-   └─ fish.json           the body formula
+   ├─ fish.json           the body formula
+   └─ bird.json
 ```
 
 Both are watched for changes — save the file and the desktop updates. No restart.
@@ -112,6 +113,33 @@ creature gets painted back within a couple of seconds.
 
 On exit the surface is un-parented before it is destroyed, so shutting down never
 leaves a stale window behind in Explorer's tree.
+
+### The other creature
+
+![The bird, from the same renderer](docs/bird.png)
+
+A bird, seen from above. Unlike the fish this one is not a port — it is built from
+scratch to show the engine is not fish-specific: `s` runs wingtip to wingtip, `q`
+scatters points across the chord, and the whole animal is one elliptical planform with
+a body spindle blended into the middle.
+
+The flap is a dihedral angle that grows towards the tips, and the top-down view shows
+it as foreshortening (`cos(flap)`). That gets the shading for free — a raised wing
+crowds the same points into fewer pixels, and the density renderer turns crowding into
+opacity, so the wings brighten as they rise without a single line of shading code.
+
+To fly it instead of the fish, replace the `critters` entry:
+
+```jsonc
+"critters": [
+  { "creature": "bird", "count": 1, "size": 210, "seed": 4,
+    "motion": { "mode": "wander", "speed": 95, "speedVariance": 0.2,
+                "turnRate": 0.9, "wanderFreq": 0.14, "levelBias": 0.9,
+                "bank": 0.5, "bobAmount": 4 } }
+]
+```
+
+Or list both and they share the sandbox.
 
 Three layers are available from the tray, or via `"layer"` in config:
 
@@ -239,6 +267,7 @@ A creature file is a list of named intermediates plus two output expressions.
   "points": 20000,
   "bodyRate": 2.356194490192345,   // radians of body phase per second
   "facing": 0,                     // degrees to rotate so +X is "forward"
+  "sizeAxis": "forward",           // forward | span | max -- what config's `size` measures
   "params": { "wobble": 1.0 },     // named knobs, overridable from config.json
 
   "vars": [ { "name": "u", "expr": "(i + 1) / n" } ],
@@ -248,6 +277,10 @@ A creature file is a list of named intermediates plus two output expressions.
   "weight": "1"      // per-point intensity
 }
 ```
+
+`sizeAxis` exists because "300 pixels" means different axes for different animals: a
+fish is longest nose-to-tail (`forward`, the default), whereas a bird's wingspan is
+several times its body length, so `bird.json` sets `span` and `size` sets the span.
 
 **Inputs available to every expression**
 
@@ -368,12 +401,12 @@ the repo carries no binary assets.
 - **`points` changes density, not length.** The original hard-coded `i/663` against
   exactly 20 000 points; dividing by `n` instead keeps the shape identical there while
   making the point count a quality dial.
-- **Only one creature ships.** The fish. The engine is not fish-specific — adding an
-  animal is a new JSON file in `creatures\` and a `"creature"` entry in config.
+- **Two creatures ship**, a fish and a bird. Adding another is a new JSON file in
+  `creatures\` and a `"creature"` entry in config — no code, no rebuild.
 
 ## Roadmap
 
-- More animals: a bird, a manta, a jellyfish.
+- More animals: a manta, a jellyfish.
 - Per-critter colour, via a second accumulation buffer.
 - Creature-aware flocking, so a school reacts to its own members.
 - Optional interaction with the mouse pointer.

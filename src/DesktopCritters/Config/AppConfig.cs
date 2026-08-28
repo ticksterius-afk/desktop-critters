@@ -218,6 +218,9 @@ public sealed class CreatureFile
     /// <summary>Rotation, in degrees, that makes the creature's +X axis its forward axis.</summary>
     public double Facing { get; set; }
 
+    /// <summary>Which extent the config's <c>size</c> measures: forward | span | max.</summary>
+    public string SizeAxis { get; set; } = "forward";
+
     public Dictionary<string, double> Params { get; set; } = new();
     public List<VarEntry> Vars { get; set; } = new();
 
@@ -237,6 +240,7 @@ public sealed class CreatureFile
         Points = Math.Max(1, Points),
         BodyRate = BodyRate,
         Facing = Facing,
+        SizeAxis = SizeAxis,
         Params = Params,
         Vars = Vars.Select(v => new VarDef(v.Name, v.Expr)).ToList(),
         Px = Px,
