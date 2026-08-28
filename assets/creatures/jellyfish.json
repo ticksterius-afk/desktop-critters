@@ -1,0 +1,98 @@
+{
+  "name": "jellyfish",
+  "description": "Port of the p5.js jellyfish sketch. The point cloud is a polar sweep: `q` is a radius modulated by a seven-fold swirl, `c` is the angle, and the bell pulses because `d` breathes with sin(t). Local +X is the direction the bell points.",
+
+  "points": 10000,
+
+  // The original advances t by PI/45 per frame at 60fps.
+  "bodyRate": 4.1887902047863905,
+
+  // No fixed forward axis to correct: `c` sweeps through the cycle and the body
+  // morphs with it, so there is no single orientation to line up.
+  "facing": 0,
+  "sizeAxis": "max",
+
+  // A jellyfish does not point where it is going -- it holds its bell and drifts.
+  // With this false the body keeps a fixed orientation and only translates.
+  "alignToHeading": false,
+
+  // Time enters in three places: sin(t)/6 and cos(d*d - t) are both TAU-periodic, but
+  // the -t * driftRate term inside `c` is the slow one, repeating every TAU/driftRate.
+  // At the original's 1/16 that is 32*PI, and TAU divides into it 16 times.
+  // Keep 1/driftRate a whole number or the loop will not close.
+  "loopPeriod": "(driftRate > 0) ? TAU / driftRate : TAU",
+
+  // `size` measures the area the body sweeps over a full cycle, which for this
+  // creature is about three times the animal at any one instant -- so it is set
+  // large deliberately. The jellyfish then meanders inside that area, which is
+  // most of what makes it look like a jellyfish.
+  "suggest": {
+    "size": 430,
+    "bodySpeed": 1.0,
+    "motion": {
+      "mode": "wander", "speed": 16, "speedVariance": 0.5,
+      "turnRate": 0.35, "wanderFreq": 0.09, "wanderAmount": 0.5,
+      "levelBias": 0.0, "margin": 190, "bank": 0.0,
+      "bobAmount": 26, "bobFreq": 0.12
+    }
+  },
+
+  "params": {
+    // The original sampled a 200-wide raster: x = i % 200, y = i / 55.
+    "ringSteps": 200,
+    "ySpan": 181.81818181818181,
+
+    // Rate at which `c`, the polar angle, sweeps. This is the jellyfish's whole
+    // animation, not merely a rotation: px uses radius `q` while py uses `q + 19*d`,
+    // so the polar map is anisotropic and shifting `c` morphs the body rather than
+    // turning it. Setting it to 0 freezes the shape into one arbitrary swirl.
+    // Must divide 1 exactly (1/16, 1/8, 1/4 ...) or the loop will not close.
+    "driftRate": 0.0625,
+
+    // Depth of the bell's pulse, the original's sin(t)/6.
+    "pulse": 0.16666666666666666,
+
+    // Number of lobes around the bell.
+    "lobes": 7,
+
+    // How far the tentacles trail behind the bell.
+    "trail": 19
+  },
+
+  "vars": [
+    { "name": "u", "expr": "i / n" },
+
+    // The raster the original walked. x cycles around the bell, y runs down the body.
+    { "name": "x", "expr": "i % ringSteps" },
+    { "name": "y", "expr": "u * ySpan" },
+
+    { "name": "k", "expr": "9 * cos(x / 8)" },
+    { "name": "e", "expr": "y / 8 - 12.5" },
+
+    // Squared radius of the (k, e) point, which is what the bell's breathing is
+    // added to. Static, so it is hoisted out of the per-frame loop.
+    { "name": "r2", "expr": "(k * k + e * e) / 99" },
+
+    // The seven-fold swirl that gives the bell its scalloped edge. atan2 and sin are
+    // both expensive and neither mentions t, so this is hoisted too.
+    { "name": "swirl", "expr": "e * sin(atan2(k, e) * lobes)" },
+    { "name": "eOff", "expr": "e / 69" },
+
+    // --- everything below breathes with t ---
+
+    // The bell's pulse: the whole radial field expands and contracts.
+    { "name": "d", "expr": "r2 + sin(t) * pulse + 0.5" },
+
+    // Polar angle. The slow -t * driftRate term rotates the whole form.
+    { "name": "c", "expr": "d / 2 + eOff - t * driftRate" },
+
+    // Radius: the swirl divided by the pulsing field, plus a ripple running out
+    // along the tentacles.
+    { "name": "q", "expr": "99 - swirl / d + k * (3 + cos(d * d - t) * 2)" }
+  ],
+
+  "px": "q * sin(c)",
+  "py": "(q + trail * d) * cos(c)",
+
+  "weight": "1"
+}

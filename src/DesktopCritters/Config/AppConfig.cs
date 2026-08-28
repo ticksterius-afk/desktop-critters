@@ -240,6 +240,12 @@ public sealed class CreatureFile
     /// </summary>
     public string LoopPeriod { get; set; } = "TAU";
 
+    /// <summary>
+    /// Whether the body rotates to face the direction of travel. False for drifters
+    /// such as a jellyfish, which hold their orientation and are simply carried along.
+    /// </summary>
+    public bool AlignToHeading { get; set; } = true;
+
     /// <summary>What this creature would like config to use for it. Optional.</summary>
     public CreatureSuggest? Suggest { get; set; }
 
@@ -264,6 +270,7 @@ public sealed class CreatureFile
         Facing = Facing,
         SizeAxis = SizeAxis,
         LoopPeriod = LoopPeriod,
+        AlignToHeading = AlignToHeading,
         Params = Params,
         Vars = Vars.Select(v => new VarDef(v.Name, v.Expr)).ToList(),
         Px = Px,

@@ -38,6 +38,13 @@ public sealed class CreatureFormula
     /// </summary>
     public string LoopPeriod { get; init; } = "TAU";
 
+    /// <summary>
+    /// Whether the body should rotate to face the direction of travel. True for
+    /// anything that swims or flies nose-first; false for drifters like a jellyfish,
+    /// which hold their orientation and are simply carried along.
+    /// </summary>
+    public bool AlignToHeading { get; init; } = true;
+
     public IReadOnlyDictionary<string, double> Params { get; init; } = new Dictionary<string, double>();
 }
 
@@ -83,6 +90,9 @@ public sealed class CreatureProgram
     /// </summary>
     public string SizeAxis { get; }
 
+    /// <summary>Whether the body turns to face the direction of travel.</summary>
+    public bool AlignToHeading { get; }
+
     /// <summary>Compiled loop period; depends on parameters, so it needs the registers.</summary>
     private readonly Func<double[], double> _loopPeriod;
 
@@ -106,9 +116,11 @@ public sealed class CreatureProgram
         Dictionary<string, int> paramSlots,
         IReadOnlyDictionary<string, double> defaults,
         double bodyRate, double facingDegrees, int defaultPoints,
-        List<string> cachedNames, string sizeAxis, Func<double[], double> loopPeriod)
+        List<string> cachedNames, string sizeAxis, Func<double[], double> loopPeriod,
+        bool alignToHeading)
     {
         _loopPeriod = loopPeriod;
+        AlignToHeading = alignToHeading;
         SizeAxis = sizeAxis;
         Name = name;
         _runStatic = runStatic;
@@ -198,7 +210,8 @@ public sealed class CreatureProgram
 
         return new CreatureProgram(
             formula.Name, runStatic, runDynamic, nextSlot, paramSlots, formula.Params,
-            formula.BodyRate, formula.Facing, formula.Points, cached, formula.SizeAxis, loopPeriod);
+            formula.BodyRate, formula.Facing, formula.Points, cached, formula.SizeAxis, loopPeriod,
+            formula.AlignToHeading);
     }
 
     /// <summary>
@@ -381,38 +394,87 @@ public sealed class CreatureProgram
         _ => halfWidth,
     };
 
+    /// <summary>Where a creature actually sits in its own local space, and how big it is.</summary>
+    public readonly record struct Extent(double CentreX, double CentreY, double HalfWidth, double HalfHeight);
+
     /// <summary>
-    /// Samples the point cloud across a full body cycle to find its local extent.
-    /// Needed to scale a creature to a requested pixel length and to size the
-    /// dirty rectangle without guessing.
+    /// Samples the point cloud across a full body cycle to find where it sits and how
+    /// far it reaches.
+    ///
+    /// Measures a real bounding box rather than max(|x|), because a formula's origin is
+    /// wherever its maths happens to put it -- the jellyfish is a polar sweep whose
+    /// points sit ~99 units out from an origin they never occupy. Taking max(|x|) there
+    /// would report a creature twice its true size, drawn off to one side, and would
+    /// keep it much too far from the sandbox edge.
+    ///
+    /// Sampling runs over the creature's own <see cref="LoopPeriodFor"/>, not over TAU.
+    /// A form whose whole body rotates through the cycle (again, the jellyfish) sweeps a
+    /// far larger area than any single phase shows, and measuring one sixteenth of that
+    /// cycle produced a centre that threw the body clean off the canvas at other phases.
     /// </summary>
-    public (double HalfWidth, double HalfHeight) MeasureExtent(
-        double[] registers, double[] cache, int points, int phaseSamples = 24)
+    public Extent MeasureExtent(double[] registers, double[] cache, int points, int phaseSamples = 24)
     {
-        double maxX = 1e-6, maxY = 1e-6;
         double cos = Math.Cos(FacingRadians), sin = Math.Sin(FacingRadians);
 
         // Sampling every point at every phase is wasteful; a decimated sweep lands
         // within a percent or two and keeps startup instant.
         int stride = Math.Max(1, points / 2000);
 
-        for (int p = 0; p < phaseSamples; p++)
+        // Walk the creature's true cycle. A long period needs more samples to catch
+        // its extremes, so scale the count with how many TAUs it spans.
+        double period = LoopPeriodFor(registers);
+        int samples = Math.Clamp(
+            (int)Math.Ceiling(phaseSamples * period / Math.Tau), phaseSamples, 512);
+        double step = period / samples;
+
+        // Pass one: the bounding box in the formula's own unrotated space.
+        double minX = double.MaxValue, maxX = double.MinValue;
+        double minY = double.MaxValue, maxY = double.MinValue;
+
+        for (int p = 0; p < samples; p++)
         {
-            double time = p * (Math.Tau / phaseSamples);
+            double time = p * step;
             for (int i = 0; i < points; i += stride)
             {
                 Evaluate(registers, cache, i, time);
                 double x = registers[RegOutX], y = registers[RegOutY];
-                if (double.IsNaN(x) || double.IsNaN(y)) continue;
+                if (!double.IsFinite(x) || !double.IsFinite(y)) continue;
 
-                double rx = x * cos - y * sin;
-                double ry = x * sin + y * cos;
-
-                if (Math.Abs(rx) > maxX) maxX = Math.Abs(rx);
-                if (Math.Abs(ry) > maxY) maxY = Math.Abs(ry);
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
             }
         }
 
-        return (maxX, maxY);
+        if (minX > maxX || minY > maxY)
+            return new Extent(0, 0, 1, 1);   // nothing finite was produced
+
+        double centreX = (minX + maxX) * 0.5;
+        double centreY = (minY + maxY) * 0.5;
+
+        // Pass two: half-extents about that centre, in the rotated frame, so that
+        // `forward` and `span` mean what they say after `facing` is applied.
+        double halfW = 1e-6, halfH = 1e-6;
+
+        for (int p = 0; p < samples; p++)
+        {
+            double time = p * step;
+            for (int i = 0; i < points; i += stride)
+            {
+                Evaluate(registers, cache, i, time);
+                double x = registers[RegOutX] - centreX;
+                double y = registers[RegOutY] - centreY;
+                if (!double.IsFinite(x) || !double.IsFinite(y)) continue;
+
+                double rx = Math.Abs(x * cos - y * sin);
+                double ry = Math.Abs(x * sin + y * cos);
+
+                if (rx > halfW) halfW = rx;
+                if (ry > halfH) halfH = ry;
+            }
+        }
+
+        return new Extent(centreX, centreY, halfW, halfH);
     }
 }

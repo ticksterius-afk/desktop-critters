@@ -122,6 +122,9 @@ public sealed class World
         return program;
     }
 
+    /// <summary>One diagnostic line per critter: where it sits, how big, how scaled.</summary>
+    public IEnumerable<string> Describe() => _critters.Select(c => c.Describe());
+
     public void Step(double dt)
     {
         // Clamp the step so a resume-from-sleep does not teleport everything into a wall.

@@ -29,6 +29,9 @@ public sealed class Critter
     private readonly double _maxTurnRate;
     private readonly double _edgePadding;
 
+    /// <summary>The body's own centre in local space; subtracted so it draws centred.</summary>
+    private readonly double _centreX, _centreY;
+
     private double _phase;
     private double _bank;
 
@@ -38,6 +41,15 @@ public sealed class Critter
     /// <summary>Half-extents of the body in canvas pixels, after scaling.</summary>
     public double HalfWidth { get; }
     public double HalfHeight { get; }
+
+    /// <summary>Local-space to pixels. Useful when a creature comes out the wrong size.</summary>
+    public double Scale => _scale;
+
+    /// <summary>One line describing how this critter was measured and scaled.</summary>
+    public string Describe() =>
+        $"centre=({_centreX:F1},{_centreY:F1}) half=({HalfWidth / Math.Max(_scale,1e-9):F1}," +
+        $"{HalfHeight / Math.Max(_scale,1e-9):F1}) scale={_scale:F4} " +
+        $"px=({HalfWidth * 2:F0}x{HalfHeight * 2:F0}) points={_points} loop={_loopPeriod:F3}";
 
     public Critter(CreatureProgram program, int points, double targetLength, double bodySpeed,
         IMotion motion, double bankAmount, double maxTurnRate, double edgePadding,
@@ -67,12 +79,16 @@ public sealed class Critter
         _cache = program.NewCache(_points);
         program.BuildCache(_registers, _points, _cache);
 
-        // Scale from the creature's own units to the requested on-screen length.
-        var (halfW, halfH) = program.MeasureExtent(_registers, _cache, _points);
-        double reference = program.ReferenceHalfExtent(halfW, halfH);
+        // Scale from the creature's own units to the requested on-screen length, and
+        // remember where the body actually sits in its own space so it can be centred.
+        var extent = program.MeasureExtent(_registers, _cache, _points);
+        _centreX = extent.CentreX;
+        _centreY = extent.CentreY;
+
+        double reference = program.ReferenceHalfExtent(extent.HalfWidth, extent.HalfHeight);
         _scale = targetLength / Math.Max(1e-6, reference * 2.0);
-        HalfWidth = halfW * _scale;
-        HalfHeight = halfH * _scale;
+        HalfWidth = extent.HalfWidth * _scale;
+        HalfHeight = extent.HalfHeight * _scale;
 
         // The creature rotates freely, so the circumscribed radius is what has to
         // clear the edge -- using just the half-length would let the tail hang off
@@ -112,9 +128,13 @@ public sealed class Critter
         // A side-on animal should mirror when it swims left, never roll upside down.
         // Mirroring about local X and rotating by heading+PI puts "forward" on the
         // velocity vector while leaving "up" pointing up.
-        bool mirror = Math.Cos(_pose.Heading) < 0;
+        //
+        // Drifters opt out entirely: a jellyfish keeps its bell where it is and simply
+        // gets carried, so it neither rotates nor mirrors.
+        bool align = _program.AlignToHeading;
+        bool mirror = align && Math.Cos(_pose.Heading) < 0;
         double m = mirror ? -1.0 : 1.0;
-        double phi = mirror ? _pose.Heading + Math.PI : _pose.Heading;
+        double phi = !align ? 0.0 : (mirror ? _pose.Heading + Math.PI : _pose.Heading);
 
         // Bank is applied in body space, before the mirror, so it leans the same way
         // whichever direction the creature is facing.
@@ -130,7 +150,10 @@ public sealed class Critter
         double c = (sp * m * cf + cp * sf) * _scale;
         double d = (-sp * m * sf + cp * cf) * _scale;
 
-        double originX = _pose.X, originY = _pose.Y;
+        // Centring is folded into the origin -- origin + M*(p - centre) is the same as
+        // (origin - M*centre) + M*p -- so per-point work is unchanged.
+        double originX = _pose.X - (a * _centreX + b * _centreY);
+        double originY = _pose.Y - (c * _centreX + d * _centreY);
         var registers = _registers;
         var cache = _cache;
         int outX = CreatureProgram.RegOutX, outY = CreatureProgram.RegOutY, outW = CreatureProgram.RegOutWeight;

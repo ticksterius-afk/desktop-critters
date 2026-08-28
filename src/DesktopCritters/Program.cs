@@ -181,6 +181,9 @@ internal static class Preview
         foreach (var warning in world.Warnings)
             Console.Error.WriteLine($"[critters] warning: {warning}");
 
+        foreach (var line in world.Describe())
+            Console.Error.WriteLine($"[critters] {line}");
+
         Directory.CreateDirectory(options.PreviewDirectory!);
 
         nuint bytes = (nuint)((long)width * height * 4);

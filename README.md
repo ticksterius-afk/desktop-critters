@@ -23,8 +23,9 @@ tail, and two texture fields — and nothing else:
 "weight": "(1 - scaleDepth + scaleDepth * scales) * (1 - patchAmount + patchAmount * patch)"
 ```
 
-Three creatures ship — `fish`, `bird` and `koi` — and you switch between them from the
-tray menu. `koi` is the original p5.js sketch this project started from, kept intact.
+Four creatures ship — `fish`, `bird`, `jellyfish` and `koi` — and you switch between
+them from the tray menu. `koi` and `jellyfish` are p5.js sketches ported as they were
+written; `fish` and `bird` are built for this engine.
 
 ---
 
@@ -59,7 +60,8 @@ On first run it writes its editable files to `%APPDATA%\DesktopCritters\`:
 └─ creatures\
    ├─ fish.json           the body formula
    ├─ bird.json
-   └─ koi.json            the original p5.js sketch, kept as-is
+   ├─ jellyfish.json      ported p5.js sketch
+   └─ koi.json            ported p5.js sketch
 ```
 
 Both are watched for changes — save the file and the desktop updates. No restart.
@@ -135,7 +137,26 @@ it as foreshortening (`cos(flap)`). That gets the shading for free — a raised 
 crowds the same points into fewer pixels, and the density renderer turns crowding into
 opacity, so the wings brighten as they rise without a single line of shading code.
 
-`koi.json` is the original p5.js sketch, preserved exactly. It is worth keeping and
+![The jellyfish, ported from p5.js](docs/jellyfish.png)
+
+`jellyfish.json` is a p5.js sketch ported intact, and it taught the engine two things.
+
+Its point cloud is a *polar sweep*: `q` is a radius carrying a seven-fold swirl, `c` is
+the angle. Because `px` uses radius `q` while `py` uses `q + 19 * d`, the mapping is
+anisotropic — so advancing `c` does not rotate the body, it **morphs** it. That sweep is
+the entire animation, which is why `driftRate` cannot simply be set to zero: doing so
+freezes the creature into one arbitrary swirl.
+
+It is also a drifter. `"alignToHeading": false` tells the renderer not to turn the body
+to face its direction of travel — a jellyfish holds its bell and is carried. Fish and
+birds leave it at the default `true`.
+
+One consequence to know about: because the whole form sweeps a wide arc over its cycle,
+its measured extent is roughly three times the animal at any one instant, and `size`
+measures that swept area. Its suggested `size` is set large to compensate, and the
+creature meanders inside that area — which is most of what makes it read as a jellyfish.
+
+`koi.json` is the original koi sketch, preserved exactly. It is worth keeping and
 worth knowing why it is no longer the default: its layout terms `cos(c)` and
 `sin(c / 3)` are driven by the same `t` that animates it, so as the phase advances the
 body does not merely bend, it *re-lays-out* — folding into separate lobes at some
@@ -284,6 +305,7 @@ A creature file is a list of named intermediates plus two output expressions.
   "facing": 0,                     // degrees to rotate so +X is "forward"
   "sizeAxis": "forward",           // forward | span | max -- what config's `size` measures
   "loopPeriod": "TAU",             // radians of t after which the shape repeats exactly
+  "alignToHeading": true,          // false for drifters that do not turn to face travel
   "suggest": { "size": 300, "motion": { "speed": 52 } },   // used by the tray picker
   "params": { "wobble": 1.0 },     // named knobs, overridable from config.json
 
@@ -314,8 +336,18 @@ depends on them:
 | `fish` | `TAU` | its one time-varying term is `sin(waves * TAU * u - t)` |
 | `bird` | `TAU / flapRate` | its one time-varying term is `sin(t * flapRate)` |
 | `koi` | `12 * PI / bodyTurn` | `sin(c / 3)` is its slowest term; `c` carries `-t * bodyTurn / 2` |
+| `jellyfish` | `TAU / driftRate` | `sin(t)` and `cos(d*d - t)` are TAU-periodic, but `c` carries `-t * driftRate` |
 
-Get it wrong and the wrap becomes a visible jump, so work it out rather than guessing:
+`loopPeriod` is load-bearing beyond the wrap: the engine measures each creature's
+extent by walking exactly one period. Measuring only a `TAU` slice of the jellyfish's
+`32 * PI` cycle put its centre in the wrong place and threw the body clean off the
+canvas at every other phase. Get it wrong and that is the kind of failure you get.
+
+Extents themselves are a real bounding box, not `max(|x|)`, and the body is drawn
+centred on it — a formula's origin is wherever its maths happens to put it, and the
+jellyfish's points sit ~99 units from an origin they never occupy.
+
+Work the period out rather than guessing:
 take every term containing `t`, find each one's period, and use the longest — checking
 that all the others divide into it. Each of the three above is verified by rendering
 one period's worth of frames and confirming the first and last are byte-identical.
@@ -463,15 +495,18 @@ the repo carries no binary assets.
 - **`points` changes density, not length.** The original hard-coded `i/663` against
   exactly 20 000 points; dividing by `n` instead keeps the shape identical there while
   making the point count a quality dial.
-- **Three creatures ship**: `fish`, `bird`, `koi`. Adding another is a new JSON file
-  dropped into `creatures\` — it appears in the tray menu on the next right-click. No
-  code, no rebuild.
+- **Four creatures ship**: `fish`, `bird`, `jellyfish`, `koi`. Adding another is a new
+  JSON file dropped into `creatures\` — it appears in the tray menu on the next
+  right-click. No code, no rebuild.
+- **`size` measures the swept extent, not the instantaneous one.** For creatures whose
+  whole body travels over the cycle — the jellyfish especially — the animal looks
+  smaller than the number suggests. Set it larger to compensate.
 - **One creature at a time from the tray.** The picker replaces the population with a
   single animal. To run several kinds together, list them in `critters` by hand.
 
 ## Roadmap
 
-- More animals: a manta, a jellyfish.
+- More animals: a manta, a squid.
 - Per-critter colour, via a second accumulation buffer.
 - Creature-aware flocking, so a school reacts to its own members.
 - Optional interaction with the mouse pointer.
