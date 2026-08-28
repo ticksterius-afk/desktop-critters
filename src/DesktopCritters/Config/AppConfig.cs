@@ -202,6 +202,18 @@ public sealed class AppConfig
 
 // ---------------------------------------------------------------------------
 
+/// <summary>
+/// Optional settings a creature recommends for itself. Applied when the creature is
+/// chosen from the tray, so switching animal does not leave a bird flapping at a
+/// koi's cruising speed.
+/// </summary>
+public sealed class CreatureSuggest
+{
+    public double? Size { get; set; }
+    public double? BodySpeed { get; set; }
+    public MotionConfig? Motion { get; set; }
+}
+
 /// <summary>JSON shape of a creature definition file.</summary>
 public sealed class CreatureFile
 {
@@ -220,6 +232,16 @@ public sealed class CreatureFile
 
     /// <summary>Which extent the config's <c>size</c> measures: forward | span | max.</summary>
     public string SizeAxis { get; set; } = "forward";
+
+    /// <summary>
+    /// Radians of <c>t</c> after which the body repeats exactly, as an expression over
+    /// this creature's params (e.g. "TAU" or "12 * PI / bodyTurn"). The phase wraps here,
+    /// so the animation loops forever with no seam and no floating-point drift.
+    /// </summary>
+    public string LoopPeriod { get; set; } = "TAU";
+
+    /// <summary>What this creature would like config to use for it. Optional.</summary>
+    public CreatureSuggest? Suggest { get; set; }
 
     public Dictionary<string, double> Params { get; set; } = new();
     public List<VarEntry> Vars { get; set; } = new();
@@ -241,6 +263,7 @@ public sealed class CreatureFile
         BodyRate = BodyRate,
         Facing = Facing,
         SizeAxis = SizeAxis,
+        LoopPeriod = LoopPeriod,
         Params = Params,
         Vars = Vars.Select(v => new VarDef(v.Name, v.Expr)).ToList(),
         Px = Px,

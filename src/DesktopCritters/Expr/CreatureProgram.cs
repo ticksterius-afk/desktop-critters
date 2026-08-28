@@ -32,6 +32,12 @@ public sealed class CreatureFormula
     /// <summary>Which extent the configured <c>size</c> measures: forward | span | max.</summary>
     public string SizeAxis { get; init; } = "forward";
 
+    /// <summary>
+    /// Radians of <c>t</c> after which the shape repeats exactly, as an expression over
+    /// this creature's parameters. Default <c>TAU</c>.
+    /// </summary>
+    public string LoopPeriod { get; init; } = "TAU";
+
     public IReadOnlyDictionary<string, double> Params { get; init; } = new Dictionary<string, double>();
 }
 
@@ -77,6 +83,9 @@ public sealed class CreatureProgram
     /// </summary>
     public string SizeAxis { get; }
 
+    /// <summary>Compiled loop period; depends on parameters, so it needs the registers.</summary>
+    private readonly Func<double[], double> _loopPeriod;
+
     /// <summary>How many time-invariant values are cached per point.</summary>
     public int CachedPerPoint { get; }
 
@@ -97,8 +106,9 @@ public sealed class CreatureProgram
         Dictionary<string, int> paramSlots,
         IReadOnlyDictionary<string, double> defaults,
         double bodyRate, double facingDegrees, int defaultPoints,
-        List<string> cachedNames, string sizeAxis)
+        List<string> cachedNames, string sizeAxis, Func<double[], double> loopPeriod)
     {
+        _loopPeriod = loopPeriod;
         SizeAxis = sizeAxis;
         Name = name;
         _runStatic = runStatic;
@@ -179,9 +189,16 @@ public sealed class CreatureProgram
         // ---- emit the per-frame pass -----------------------------------------
         var runDynamic = EmitDynamic(formula, dynamicVars, paramSlots, cacheSlots);
 
+        // ---- loop period, as a formula over the creature's own parameters -------
+        var periodRegisters = Expression.Parameter(typeof(double[]), "r");
+        var periodScope = BaseScope(periodRegisters, paramSlots);
+        var loopPeriod = Expression.Lambda<Func<double[], double>>(
+            ParseOrThrow(formula.Name, "loopPeriod", formula.LoopPeriod, n => periodScope.GetValueOrDefault(n)),
+            periodRegisters).Compile();
+
         return new CreatureProgram(
             formula.Name, runStatic, runDynamic, nextSlot, paramSlots, formula.Params,
-            formula.BodyRate, formula.Facing, formula.Points, cached, formula.SizeAxis);
+            formula.BodyRate, formula.Facing, formula.Points, cached, formula.SizeAxis, loopPeriod);
     }
 
     /// <summary>
@@ -342,6 +359,18 @@ public sealed class CreatureProgram
         registers[RegIndex] = index;
         registers[RegTime] = time;
         _runDynamic(registers, cache, index * CachedPerPoint);
+    }
+
+    /// <summary>
+    /// How far <c>t</c> must advance before the shape repeats exactly. Wrapping the
+    /// body phase here (rather than at some arbitrary large number) is what makes the
+    /// animation loop with no visible seam and no drift, however long it runs.
+    /// Falls back to TAU if the creature's expression yields something unusable.
+    /// </summary>
+    public double LoopPeriodFor(double[] registers)
+    {
+        double period = _loopPeriod(registers);
+        return double.IsFinite(period) && period > 1e-6 ? period : Math.Tau;
     }
 
     /// <summary>Picks the half-extent that <c>size</c> is measured against.</summary>

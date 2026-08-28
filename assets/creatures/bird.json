@@ -14,6 +14,22 @@
   // means the span here, not the nose-to-tail length a fish uses.
   "sizeAxis": "span",
 
+  // The only time-varying term is sin(t * flapRate), so the wingbeat repeats
+  // exactly every TAU/flapRate radians.
+  "loopPeriod": "TAU / flapRate",
+
+  // Applied when this creature is picked from the tray menu. Birds cruise faster
+  // and bank harder than fish, and `size` here means wingspan.
+  "suggest": {
+    "size": 210,
+    "bodySpeed": 1.0,
+    "motion": {
+      "mode": "wander", "speed": 95, "speedVariance": 0.2,
+      "turnRate": 0.9, "wanderFreq": 0.14, "levelBias": 0.9,
+      "margin": 200, "bank": 0.5, "bobAmount": 4
+    }
+  },
+
   "params": {
     // Half-wingspan and half-chord, in the formula's own units.
     "span": 100,
@@ -62,7 +78,10 @@
 
     // Dihedral angle. The tips travel much further than the shoulders, hence the
     // exponent; a linear ramp makes the wings look hinged rather than flexible.
-    { "name": "flap", "expr": "flapAmp * sin(t * flapRate) * pow(as, 1.4)" },
+    // The pow() has no `t` in it, so splitting it out hoists it clean out of the
+    // per-frame loop.
+    { "name": "tipRamp", "expr": "flapAmp * pow(as, 1.4)" },
+    { "name": "flap", "expr": "tipRamp * sin(t * flapRate)" },
 
     // Seen from above, a raised wing is foreshortened. This is also what makes the
     // wings brighten as they rise: the same points crowd into fewer pixels, and the

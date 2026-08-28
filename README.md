@@ -4,23 +4,27 @@ Formula-driven animals that live on your Windows desktop. A creature is not a sp
 or a video — it's a **maths expression** evaluated over twenty thousand points every
 frame, written in JSON that you can edit while the widget is running.
 
-![The stock koi, captured from the live widget](docs/fish.png)
+![The stock fish, rendered by the widget](docs/fish.png)
 
-The fish above is a direct port of a p5.js point-cloud sketch. The whole creature is
-this, and nothing else:
+The fish above is a spindle along a spine, a travelling wave that grows towards the
+tail, and two texture fields — and nothing else:
 
 ```jsonc
 "vars": [
-  { "name": "u",      "expr": "(i + 1) / n" },
-  { "name": "y",      "expr": "u * spine" },
-  { "name": "k",      "expr": "(4 + cos(y)) * cos(i)" },
-  { "name": "e",      "expr": "y / 5 - 11" },
-  { "name": "d",      "expr": "mag(k, e) - 5" },
-  { "name": "c",      "expr": "d / 2.5 - t / 2 * bodyTurn + (i % 2) * sheetOffset" }
+  { "name": "u",      "expr": "(i + 1) / n" },                            // nose to tail
+  { "name": "q",      "expr": "acos(cos(i)) / PI * 2 - 1" },              // across the body
+  { "name": "prof",   "expr": "pow(u, 0.62) * pow(max(0, 1 - u), 0.85) * 2.8" },
+  { "name": "scales", "expr": "0.5 + 0.5 * sin(u * scaleRows * TAU) * sin(q * scaleCols * PI)" },
+  { "name": "patch",  "expr": "smoothstep(0.42, 0.62, noise(u * patchScale + patchSeed, q * 1.8))" },
+  { "name": "swing",  "expr": "waveAmp * pow(u, waveBias) * sin(waves * TAU * u - t)" }
 ],
-"px": "radius * cos(c)",
-"py": "99 * sin(c / 3) + dd * sin(t * 2 - d) * sweep + ripple + flank * wobble"
+"px": "(0.5 - u) * len",
+"py": "q * half + swing",
+"weight": "(1 - scaleDepth + scaleDepth * scales) * (1 - patchAmount + patchAmount * patch)"
 ```
+
+Three creatures ship — `fish`, `bird` and `koi` — and you switch between them from the
+tray menu. `koi` is the original p5.js sketch this project started from, kept intact.
 
 ---
 
@@ -36,8 +40,11 @@ dotnet build src/DesktopCritters/DesktopCritters.csproj -c Release
 ./src/DesktopCritters/bin/Release/net8.0-windows/DesktopCritters.exe
 ```
 
-A fish icon appears in the notification area. Right-click it for pause, layer, reload,
-and exit. The widget is click-through, so the tray icon is the only thing you can
+A fish icon appears in the notification area. Right-click it for **Creature** (pick
+any animal in the creatures folder), pause, layer, reload, and exit. Choosing a
+creature swaps the whole population for a single one of that kind and applies the
+settings that creature recommends for itself, so a bird does not end up flapping at a
+koi's cruising speed. The widget is click-through, so the tray icon is the only thing you can
 actually click.
 
 Only one instance runs at a time - a second launch refuses and exits, so repeated
@@ -51,7 +58,8 @@ On first run it writes its editable files to `%APPDATA%\DesktopCritters\`:
 ├─ config.json            speed, colour, sandbox, layer, fps
 └─ creatures\
    ├─ fish.json           the body formula
-   └─ bird.json
+   ├─ bird.json
+   └─ koi.json            the original p5.js sketch, kept as-is
 ```
 
 Both are watched for changes — save the file and the desktop updates. No restart.
@@ -114,21 +122,28 @@ creature gets painted back within a couple of seconds.
 On exit the surface is un-parented before it is destroyed, so shutting down never
 leaves a stale window behind in Explorer's tree.
 
-### The other creature
+### The other creatures
 
 ![The bird, from the same renderer](docs/bird.png)
 
-A bird, seen from above. Unlike the fish this one is not a port — it is built from
-scratch to show the engine is not fish-specific: `s` runs wingtip to wingtip, `q`
-scatters points across the chord, and the whole animal is one elliptical planform with
-a body spindle blended into the middle.
+A bird, seen from above: `s` runs wingtip to wingtip, `q` scatters points across the
+chord, and the whole animal is one planform with a body spindle blended into the
+middle.
 
 The flap is a dihedral angle that grows towards the tips, and the top-down view shows
 it as foreshortening (`cos(flap)`). That gets the shading for free — a raised wing
 crowds the same points into fewer pixels, and the density renderer turns crowding into
 opacity, so the wings brighten as they rise without a single line of shading code.
 
-To fly it instead of the fish, replace the `critters` entry:
+`koi.json` is the original p5.js sketch, preserved exactly. It is worth keeping and
+worth knowing why it is no longer the default: its layout terms `cos(c)` and
+`sin(c / 3)` are driven by the same `t` that animates it, so as the phase advances the
+body does not merely bend, it *re-lays-out* — folding into separate lobes at some
+phases and flinging long detached streamers from the `flank` term. One animal reads as
+three. The stock `fish` separates the two concerns, so its outline is fixed and only
+the bend varies.
+
+To fly the bird from config instead of the tray, replace the `critters` entry:
 
 ```jsonc
 "critters": [
@@ -268,6 +283,8 @@ A creature file is a list of named intermediates plus two output expressions.
   "bodyRate": 2.356194490192345,   // radians of body phase per second
   "facing": 0,                     // degrees to rotate so +X is "forward"
   "sizeAxis": "forward",           // forward | span | max -- what config's `size` measures
+  "loopPeriod": "TAU",             // radians of t after which the shape repeats exactly
+  "suggest": { "size": 300, "motion": { "speed": 52 } },   // used by the tray picker
   "params": { "wobble": 1.0 },     // named knobs, overridable from config.json
 
   "vars": [ { "name": "u", "expr": "(i + 1) / n" } ],
@@ -281,6 +298,27 @@ A creature file is a list of named intermediates plus two output expressions.
 `sizeAxis` exists because "300 pixels" means different axes for different animals: a
 fish is longest nose-to-tail (`forward`, the default), whereas a bird's wingspan is
 several times its body length, so `bird.json` sets `span` and `size` sets the span.
+
+### Looping seamlessly
+
+`loopPeriod` is how far `t` must advance before the shape repeats *exactly*. The engine
+wraps the body phase there on every frame, which does two things: the animation loops
+forever with no visible seam, and the phase can never grow large enough to lose
+floating-point precision no matter how long the widget runs.
+
+It is an expression over the creature's own parameters, because the period usually
+depends on them:
+
+| creature | loopPeriod | why |
+|---|---|---|
+| `fish` | `TAU` | its one time-varying term is `sin(waves * TAU * u - t)` |
+| `bird` | `TAU / flapRate` | its one time-varying term is `sin(t * flapRate)` |
+| `koi` | `12 * PI / bodyTurn` | `sin(c / 3)` is its slowest term; `c` carries `-t * bodyTurn / 2` |
+
+Get it wrong and the wrap becomes a visible jump, so work it out rather than guessing:
+take every term containing `t`, find each one's period, and use the longest — checking
+that all the others divide into it. Each of the three above is verified by rendering
+one period's worth of frames and confirming the first and last are byte-identical.
 
 **Inputs available to every expression**
 
@@ -310,6 +348,26 @@ sketches port with minimal editing:
 Anything unrecognised is a load-time error naming the creature, the field, and the
 offset in the expression — the widget keeps running on the previous world rather than
 dying.
+
+### Texture
+
+`weight` is per-point intensity, and because the renderer turns accumulated density
+into both opacity *and* colour-ramp position, modulating it is all texture takes. The
+fish multiplies two fields into it:
+
+```jsonc
+{ "name": "scales", "expr": "0.5 + 0.5 * sin(u * scaleRows * TAU) * sin(q * scaleCols * PI)" },
+{ "name": "patch",  "expr": "smoothstep(0.42, 0.62, noise(u * patchScale + patchSeed, q * 1.8))" }
+```
+
+`scales` is a sine grid — rows along the body, columns across it — sampled at each
+point's own position, so it reads as scales rather than as stripes. `patch` is soft
+noise thresholded into the irregular blotches a koi carries; `patchSeed` shifts the
+pattern, so giving each fish a different value means no two share markings.
+
+Both are tuned from config without touching the formula: `scaleDepth` and
+`patchAmount` set how far each pushes, and `0` on both gives a plain body. Neither
+mentions `t`, so both are hoisted and cost nothing per frame.
 
 ### Free performance: keep time out of a var
 
@@ -359,17 +417,24 @@ python tools/montage.py sheet.png out/frame000.png out/frame004.png out/frame008
 
 ## Performance
 
-Measured on Windows 11, one fish, 20 000 points, single thread:
+Measured on Windows 11: one `fish`, 22 000 points, full 2560 × 1392 work area, desktop
+layer, single thread.
 
-| sandbox | layer | fps | CPU | working set |
-|---|---|---|---|---|
-| 700 × 500 | topmost | 30 | 7.3% of one core | 37 MB |
-| 2560 × 1392 (full work area) | desktop | 30 | 7.3% of one core | 65 MB |
-| 2560 × 1392 (full work area) | desktop | **60** | 11.1% of one core | 65 MB |
+| fps | CPU | working set |
+|---|---|---|
+| 30 | 4.5% of one core | 66 MB |
+| **60** | 8.6% of one core | 66 MB |
 
-At 60 fps the per-frame formula dominates. If you want it cheaper, `points` is the
-strongest dial: halving it to 10 000 roughly halves the CPU and the fish only looks
-slightly less dense.
+A full-screen sandbox costs the same CPU as a small one, because presents use a dirty
+rectangle — the blit scales with the creature, not the sandbox. Only memory grows, since
+the density buffer and the DIB are both allocated at sandbox size (≈8 bytes/pixel).
+
+The per-frame formula dominates at 60 fps, so `points` is the strongest dial: halving it
+roughly halves the CPU and the fish only looks slightly less dense. Then `fps`, then
+sandbox size for memory.
+
+For reference, `koi` costs about 30% more than `fish` at the same point count — it runs
+three `sin`/`cos` calls per point in its time-varying path where `fish` runs one.
 
 A full-screen sandbox costs the same CPU as a small one because presents use a dirty
 rectangle — the blit scales with the fish, not the sandbox. Only memory grows, since
@@ -389,20 +454,20 @@ the repo carries no binary assets.
 - **One colour ramp for all critters.** The renderer accumulates every creature into a
   single density buffer, so per-critter palettes would need a second pass. Global
   `render.colors` only, for now.
-- **The body formula rotates as it animates.** The original sketch's `-t/2` term turns
-  the fish a full revolution per cycle, which fights being steered somewhere. The
-  `bodyTurn` parameter damps this; `0.25` holds a heading while still looking alive,
-  and `1.0` restores the original's endless circling.
-- **The original formula draws two fish, not one.** Its `(i % 2) * 8` term splits the
-  cloud into two sheets offset by 8 radians of phase -- far enough apart that they read
-  as two separate animals rather than one body with volume. `sheetOffset` controls it
-  and now defaults to `0`: every point on one surface, a single denser fish. Set it
-  back to `8` for the original.
+- **`koi.json` re-lays-out as it animates.** The p5 original drives its layout terms
+  from the same `t` that animates it, so it folds into lobes at some phases and throws
+  detached streamers. `bodyTurn` damps the rotation and `sheetOffset` (now `0`) stops it
+  splitting into two sheets, but the effect cannot be fully tuned away — which is why
+  the purpose-built `fish` is the default. Set `bodyTurn: 1` and `sheetOffset: 8` to see
+  the sketch exactly as written.
 - **`points` changes density, not length.** The original hard-coded `i/663` against
   exactly 20 000 points; dividing by `n` instead keeps the shape identical there while
   making the point count a quality dial.
-- **Two creatures ship**, a fish and a bird. Adding another is a new JSON file in
-  `creatures\` and a `"creature"` entry in config — no code, no rebuild.
+- **Three creatures ship**: `fish`, `bird`, `koi`. Adding another is a new JSON file
+  dropped into `creatures\` — it appears in the tray menu on the next right-click. No
+  code, no rebuild.
+- **One creature at a time from the tray.** The picker replaces the population with a
+  single animal. To run several kinds together, list them in `critters` by hand.
 
 ## Roadmap
 

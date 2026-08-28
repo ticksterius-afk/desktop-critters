@@ -32,6 +32,9 @@ public sealed class Critter
     private double _phase;
     private double _bank;
 
+    /// <summary>Radians of body phase after which the formula repeats exactly.</summary>
+    private readonly double _loopPeriod;
+
     /// <summary>Half-extents of the body in canvas pixels, after scaling.</summary>
     public double HalfWidth { get; }
     public double HalfHeight { get; }
@@ -76,8 +79,10 @@ public sealed class Critter
         // whenever the fish is swimming diagonally.
         Radius = Math.Sqrt(HalfWidth * HalfWidth + HalfHeight * HalfHeight) * _edgePadding;
 
+        _loopPeriod = program.LoopPeriodFor(_registers);
+
         // Offset the body cycle so a school of fish does not beat in lockstep.
-        _phase = Noise.At(seed * 5.17 + 0.3) * Math.Tau;
+        _phase = Noise.At(seed * 5.17 + 0.3) * _loopPeriod;
     }
 
     /// <summary>Distance from the creature's centre that must stay inside the sandbox.</summary>
@@ -89,8 +94,11 @@ public sealed class Critter
 
     public void Step(double dt, double width, double height)
     {
+        // Wrap at the creature's own period, every frame. Because the shape is exactly
+        // equal at phase p and p + loopPeriod, the wrap is invisible -- and the phase can
+        // never grow large enough to lose precision, however long the widget runs.
         _phase += _program.BodyRate * _bodySpeed * dt;
-        if (_phase > 1e6) _phase %= Math.Tau;   // keep float precision from degrading over days
+        if (_phase >= _loopPeriod) _phase %= _loopPeriod;
 
         _motion.Step(dt, BoundsFor(width, height), _pose);
 

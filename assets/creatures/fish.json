@@ -1,41 +1,114 @@
 {
   "name": "fish",
-  "description": "Koi, ported from the p5.js point-cloud sketch. `i` is the point index, `t` is the body phase in radians, `n` is the point count. Vars are evaluated in order and each is visible to the ones after it. Local space is centred on the fish with +X pointing forward (head). Vars that do not mention `t` are hoisted out of the per-frame loop automatically, so splitting time-invariant work into its own var is free performance.",
+  "description": "A koi seen from above, built rather than ported. The body is a spindle along the spine, the tail beat is a travelling wave whose amplitude grows towards the tail, and the surface carries scale and patch texture. Unlike koi.json this stays one coherent animal at every phase of the cycle, and repeats exactly every TAU radians.",
 
-  "points": 20000,
-  "bodyRate": 2.356194490192345,
+  "points": 22000,
+
+  // TAU * 1.2 -- about 1.2 tail-beats per second at bodySpeed 1.
+  "bodyRate": 7.5398223686155035,
+
+  // Local +X is already the nose.
   "facing": 0,
+  "sizeAxis": "forward",
+
+  // The only time-varying term is sin(waves*TAU*u - t), which repeats exactly every
+  // TAU. The engine wraps the body phase here, so the animation loops forever with
+  // no seam and no drift.
+  "loopPeriod": "TAU",
+
+  // Applied when this creature is picked from the tray menu.
+  "suggest": {
+    "size": 300,
+    "bodySpeed": 1.0,
+    "motion": {
+      "mode": "wander", "speed": 52, "speedVariance": 0.35,
+      "turnRate": 1.1, "wanderFreq": 0.18, "levelBias": 0.7,
+      "margin": 220, "bank": 0.35, "bobAmount": 7
+    }
+  },
 
   "params": {
-    // Splits the point cloud into two interleaved sheets offset by this many radians
-    // of phase. The original sketch uses 8, which throws the two sheets far enough
-    // apart that they read as two separate fish. 0 keeps every point on one surface:
-    // a single, denser animal.
-    "sheetOffset": 0.0,
+    // Proportions, in the formula's own units. Config `size` scales the whole thing,
+    // so only the ratios between these matter.
+    "len": 200,
+    "width": 26,
 
-    "bodyTurn": 0.25,
-    "wobble": 1.0,
-    "sweep": 1.0,
-    "spine": 30.166
+    // Travelling wave: how far the tail swings, and how many wavelengths fit the body.
+    "waveAmp": 30,
+    "waves": 1.1,
+
+    // How sharply the swing is confined to the rear. Higher keeps the head still.
+    "waveBias": 1.8,
+
+    // Fins.
+    "tailFin": 26,
+    "dorsal": 9,
+    "pelvic": 6,
+
+    // Texture. scaleRows runs along the body, scaleCols across it.
+    "scaleRows": 30,
+    "scaleCols": 6,
+    "scaleDepth": 0.35,
+
+    // Koi blotches: patchScale is their size, patchAmount how dark the gaps go.
+    "patchScale": 4.5,
+    "patchAmount": 0.8,
+
+    // Shifts the blotch pattern. Give each fish a different value and no two carry
+    // the same markings.
+    "patchSeed": 0.0
   },
 
   "vars": [
+    // Station along the spine: 0 at the nose, 1 at the tail tip.
     { "name": "u", "expr": "(i + 1) / n" },
-    { "name": "y", "expr": "u * spine" },
-    { "name": "k", "expr": "(4 + cos(y)) * cos(i)" },
-    { "name": "e", "expr": "y / 5 - 11" },
-    { "name": "d", "expr": "mag(k, e) - 5" },
 
-    { "name": "dd", "expr": "d * d" },
-    { "name": "radius", "expr": "79 + k * k" },
-    { "name": "ripple", "expr": "3 * sin(k * 2)" },
-    { "name": "flank", "expr": "sin(y / 9 + 6) * k * (e + sin(e * 4 - d * 4))" },
+    // Across the body, -1 to 1. cos(i) alone piles points at the two edges (it is
+    // arcsine-distributed); folding it through acos gives a genuinely uniform spread,
+    // so the body fills instead of just outlining.
+    { "name": "q", "expr": "acos(cos(i)) / PI * 2 - 1" },
 
-    { "name": "c", "expr": "d / 2.5 - t / 2 * bodyTurn + (i % 2) * sheetOffset" }
+    // Half-width profile. A symmetric sin() bulge gives a blunt snout and a fat
+    // middle; this beta-shaped curve peaks about a third of the way back and tapers
+    // to a point at the nose. The 2.8 renormalises its peak back to ~1.
+    { "name": "prof", "expr": "pow(u, 0.62) * pow(max(0, 1 - u), 0.85) * 2.8" },
+    { "name": "peduncle", "expr": "1 - 0.45 * smoothstep(0.6, 0.88, u)" },
+    { "name": "bodyW", "expr": "width * prof * peduncle" },
+
+    // Caudal fin flares back out at the very end.
+    { "name": "caudal", "expr": "tailFin * smoothstep(0.84, 1.0, u)" },
+
+    // Dorsal sits on one side of the centreline, pelvic on the other, so the
+    // silhouette is not perfectly symmetric.
+    { "name": "dors", "expr": "dorsal * smoothstep(0.24, 0.4, u) * (1 - smoothstep(0.54, 0.72, u)) * step(0, q)" },
+    { "name": "pelv", "expr": "pelvic * smoothstep(0.3, 0.44, u) * (1 - smoothstep(0.5, 0.64, u)) * step(0, -q)" },
+
+    { "name": "half", "expr": "bodyW + caudal + dors + pelv" },
+
+    // --- texture (no `t`, so all of this is hoisted out of the per-frame loop) ---
+
+    // Overlapping sine grid: rows down the body, columns across it. Sampled at the
+    // point's own position, so it reads as scales rather than as stripes.
+    { "name": "scales", "expr": "0.5 + 0.5 * sin(u * scaleRows * TAU) * sin(q * scaleCols * PI)" },
+
+    // Soft irregular blotches, the koi's markings.
+    { "name": "patch", "expr": "smoothstep(0.42, 0.62, noise(u * patchScale + patchSeed, q * 1.8))" },
+
+    // --- the swim ---
+
+    // Travelling wave down the body. The taper keeps the nose almost still while the
+    // tail sweeps, which is what makes it read as swimming rather than sliding
+    // sideways. Both the taper and the along-body phase are split out into their own
+    // vars because neither mentions `t` -- that hoists a pow() and a multiply out of
+    // the per-frame loop and leaves exactly one sin() per point.
+    { "name": "taper", "expr": "waveAmp * pow(u, waveBias)" },
+    { "name": "wavePhase", "expr": "waves * TAU * u" },
+
+    { "name": "swing", "expr": "taper * sin(wavePhase - t)" }
   ],
 
-  "px": "radius * cos(c)",
-  "py": "99 * sin(c / 3) + dd * sin(t * 2 - d) * sweep + ripple + flank * wobble",
+  "px": "(0.5 - u) * len",
+  "py": "q * half + swing",
 
-  "weight": "1"
+  "weight": "(1 - scaleDepth + scaleDepth * scales) * (1 - patchAmount + patchAmount * patch)"
 }

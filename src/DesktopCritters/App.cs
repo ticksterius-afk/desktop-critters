@@ -28,6 +28,9 @@ internal sealed class App : IDisposable
     private const int CmdLayerTopmost = 12;
     private const int CmdExit = 20;
 
+    /// <summary>Creature entries occupy CmdCreatureBase .. CmdCreatureBase + count - 1.</summary>
+    private const int CmdCreatureBase = 100;
+
     private readonly string _configPath;
     private readonly string? _layerOverride;
 
@@ -49,6 +52,16 @@ internal sealed class App : IDisposable
     private volatile bool _relayoutRequested;
     private long _reloadDueTicks;
     private long _nextTickErrorTicks;
+
+    /// <summary>Creature names as listed in the tray menu, in command-id order.</summary>
+    private List<string> _menuCreatures = new();
+
+    /// <summary>
+    /// Ignore config-file change events until this timestamp. Set when *we* write the
+    /// config, so choosing a creature from the tray does not bounce straight back
+    /// through the file watcher and rebuild the world a second time.
+    /// </summary>
+    private long _ignoreWatchUntilTicks;
 
     public App(string configPath, string? layerOverride)
     {
@@ -108,6 +121,10 @@ internal sealed class App : IDisposable
     /// <summary>Recomputes the sandbox, resizes the surface, and rebuilds the population.</summary>
     private void ApplyConfig(bool rebuildWorld)
     {
+        // Keep the creature list current here as well as when the menu is built, so
+        // command routing never depends on the menu having been opened first.
+        _menuCreatures = Paths.AvailableCreatures();
+
         _sandbox = ComputeSandbox(_config.Sandbox);
 
         int width = Math.Clamp(_sandbox.Width, 16, 8192);
@@ -120,7 +137,8 @@ internal sealed class App : IDisposable
 
         _world.Configure(_config, width, height);
 
-        string tip = $"Desktop Critters — {_world.CritterCount} critter(s), {_world.TotalPoints:N0} points\n{where}";
+        string kinds = string.Join(", ", _config.Critters.Select(c => c.Creature).Distinct());
+        string tip = $"Desktop Critters — {kinds}\n{_world.CritterCount} critter(s), {_world.TotalPoints:N0} points\n{where}";
         if (_world.Warnings.Count > 0)
             tip += "\n! " + string.Join("; ", _world.Warnings.Take(2));
         _tray?.SetTooltip(tip);
@@ -292,6 +310,22 @@ internal sealed class App : IDisposable
             Win32.AppendMenu(menu, Win32.MF_STRING, (UIntPtr)CmdPauseResume, _paused ? "Resume" : "Pause");
             Win32.AppendMenu(menu, Win32.MF_SEPARATOR, UIntPtr.Zero, null);
 
+            // Creature picker, built from whatever is in the creatures folder.
+            _menuCreatures = Paths.AvailableCreatures();
+            if (_menuCreatures.Count > 0)
+            {
+                string current = _config.Critters.Count > 0 ? _config.Critters[0].Creature : string.Empty;
+
+                IntPtr creatures = Win32.CreatePopupMenu();
+                for (int i = 0; i < _menuCreatures.Count && i < 40; i++)
+                {
+                    bool active = _menuCreatures[i].Equals(current, StringComparison.OrdinalIgnoreCase);
+                    Win32.AppendMenu(creatures, Win32.MF_STRING | Check(active),
+                        (UIntPtr)(CmdCreatureBase + i), _menuCreatures[i]);
+                }
+                Win32.AppendMenu(menu, Win32.MF_POPUP, (UIntPtr)(ulong)creatures.ToInt64(), "Creature");
+            }
+
             IntPtr layers = Win32.CreatePopupMenu();
             Win32.AppendMenu(layers, Win32.MF_STRING | Check(_layer == LayerMode.Desktop), (UIntPtr)CmdLayerDesktop, "On the desktop");
             Win32.AppendMenu(layers, Win32.MF_STRING | Check(_layer == LayerMode.Bottom), (UIntPtr)CmdLayerBottom, "Behind all windows");
@@ -315,6 +349,12 @@ internal sealed class App : IDisposable
 
     private void HandleCommand(int id)
     {
+        if (id >= CmdCreatureBase && id < CmdCreatureBase + _menuCreatures.Count)
+        {
+            SwitchCreature(_menuCreatures[id - CmdCreatureBase]);
+            return;
+        }
+
         switch (id)
         {
             case CmdPauseResume:
@@ -339,6 +379,55 @@ internal sealed class App : IDisposable
                 Win32.PostQuitMessage(0);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Replaces the population with a single creature of the chosen kind, applies
+    /// whatever settings that creature recommends for itself, and persists the choice.
+    /// </summary>
+    private void SwitchCreature(string name)
+    {
+        var spec = _config.Critters.Count > 0 ? _config.Critters[0] : new CritterConfig();
+        if (spec.Creature.Equals(name, StringComparison.OrdinalIgnoreCase) && _config.Critters.Count == 1)
+            return;
+
+        spec.Creature = name;
+        spec.Count = 1;
+
+        // A bird flapping at a koi's cruising speed looks wrong, so let the creature
+        // file bring its own defaults along.
+        try
+        {
+            string path = Path.Combine(Paths.CreaturesDirectory, name + ".json");
+            if (File.Exists(path))
+            {
+                var suggest = CreatureFile.Load(path).Suggest;
+                if (suggest?.Size is double size) spec.Size = size;
+                if (suggest?.BodySpeed is double bodySpeed) spec.BodySpeed = bodySpeed;
+                if (suggest?.Motion is not null) spec.Motion = suggest.Motion;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"could not read suggestions for '{name}': {ex.Message}");
+        }
+
+        _config.Critters = new List<CritterConfig> { spec };
+
+        try
+        {
+            _config.Save(_configPath);
+            // Our own write must not trigger the watcher into a second rebuild.
+            _ignoreWatchUntilTicks = Stopwatch.GetTimestamp() + Stopwatch.Frequency;
+            _reloadRequested = false;
+        }
+        catch (Exception ex)
+        {
+            Log($"could not save the creature choice: {ex.Message}");
+        }
+
+        Log($"creature switched to '{name}'");
+        ApplyConfig(rebuildWorld: true);
     }
 
     private void SwitchLayer(LayerMode mode)
@@ -384,6 +473,9 @@ internal sealed class App : IDisposable
 
             PumpMessages();
             if (!_running) break;
+
+            if (_reloadRequested && now < _ignoreWatchUntilTicks)
+                _reloadRequested = false;   // this was our own write
 
             if (_reloadRequested && now >= _reloadDueTicks)
             {

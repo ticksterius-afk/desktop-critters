@@ -15,6 +15,20 @@ public static class Paths
     public static string ConfigFile => Path.Combine(Root, "config.json");
     public static string CreaturesDirectory => Path.Combine(Root, "creatures");
 
+    /// <summary>Names of every creature file present, without the .json, sorted.</summary>
+    public static List<string> AvailableCreatures()
+    {
+        if (!Directory.Exists(CreaturesDirectory))
+            return new List<string>();
+
+        return Directory.GetFiles(CreaturesDirectory, "*.json")
+            .Select(Path.GetFileNameWithoutExtension)
+            .Where(n => !string.IsNullOrEmpty(n))
+            .Select(n => n!)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     /// <summary>
     /// Creates the config tree on first run. Only ever writes files that are
     /// missing, so an edited creature is never clobbered by an upgrade.

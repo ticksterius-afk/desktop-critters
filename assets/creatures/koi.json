@@ -1,0 +1,56 @@
+{
+  "name": "koi",
+  "description": "The original p5.js point-cloud sketch, ported from the p5.js point-cloud sketch. `i` is the point index, `t` is the body phase in radians, `n` is the point count. Vars are evaluated in order and each is visible to the ones after it. Local space is centred on the fish with +X pointing forward (head). Vars that do not mention `t` are hoisted out of the per-frame loop automatically, so splitting time-invariant work into its own var is free performance.",
+
+  "points": 20000,
+  "bodyRate": 2.356194490192345,
+  "facing": 0,
+
+  // sin(c/3) is the slowest term: c carries -t*bodyTurn/2, so c/3 repeats
+  // every 12*PI/bodyTurn radians of t. sin(2t-d) repeats every PI, which divides it.
+  "loopPeriod": "12 * PI / bodyTurn",
+
+  // Applied when this creature is picked from the tray menu.
+  "suggest": {
+    "size": 300,
+    "bodySpeed": 1.0,
+    "motion": {
+      "mode": "wander", "speed": 52, "speedVariance": 0.35,
+      "turnRate": 1.1, "wanderFreq": 0.18, "levelBias": 0.7,
+      "margin": 220, "bank": 0.35, "bobAmount": 7
+    }
+  },
+
+  "params": {
+    // Splits the point cloud into two interleaved sheets offset by this many radians
+    // of phase. The original sketch uses 8, which throws the two sheets far enough
+    // apart that they read as two separate fish. 0 keeps every point on one surface:
+    // a single, denser animal.
+    "sheetOffset": 0.0,
+
+    "bodyTurn": 0.25,
+    "wobble": 1.0,
+    "sweep": 1.0,
+    "spine": 30.166
+  },
+
+  "vars": [
+    { "name": "u", "expr": "(i + 1) / n" },
+    { "name": "y", "expr": "u * spine" },
+    { "name": "k", "expr": "(4 + cos(y)) * cos(i)" },
+    { "name": "e", "expr": "y / 5 - 11" },
+    { "name": "d", "expr": "mag(k, e) - 5" },
+
+    { "name": "dd", "expr": "d * d" },
+    { "name": "radius", "expr": "79 + k * k" },
+    { "name": "ripple", "expr": "3 * sin(k * 2)" },
+    { "name": "flank", "expr": "sin(y / 9 + 6) * k * (e + sin(e * 4 - d * 4))" },
+
+    { "name": "c", "expr": "d / 2.5 - t / 2 * bodyTurn + (i % 2) * sheetOffset" }
+  ],
+
+  "px": "radius * cos(c)",
+  "py": "99 * sin(c / 3) + dd * sin(t * 2 - d) * sweep + ripple + flank * wobble",
+
+  "weight": "1"
+}
