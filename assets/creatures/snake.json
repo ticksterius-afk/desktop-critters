@@ -1,0 +1,98 @@
+{
+  "name": "snake",
+  "description": "Port of the p5.js snake sketch. A sinusoidal spine running head (+X) to tail (-X), with the body swept perpendicular to the spine's own tangent so the thickness stays square to the curve through every bend.",
+
+  "points": 10000,
+
+  // The original advances t by PI/60 per frame at 60fps.
+  "bodyRate": 3.141592653589793,
+
+  // Local +X is already the head: px goes from +len/2 at s=0 down to -len/2 at s=1.
+  "facing": 0,
+  "sizeAxis": "forward",
+
+  // p carries -t * waveSpeed, so sin(p) repeats every TAU/waveSpeed and the second
+  // harmonic sin(2p) every half of that -- which divides in cleanly. At the
+  // original's waveSpeed of 2 the whole body repeats every PI.
+  "loopPeriod": "TAU / waveSpeed",
+
+  "suggest": {
+    "size": 420,
+    "bodySpeed": 1.0,
+    "motion": {
+      "mode": "wander", "speed": 46, "speedVariance": 0.3,
+      "turnRate": 0.8, "wanderFreq": 0.15, "levelBias": 0.8,
+      "margin": 240, "bank": 0.3, "bobAmount": 5, "bobFreq": 0.2
+    }
+  },
+
+  "params": {
+    // Nose-to-tail length in the formula's own units. Also the run of the spine that
+    // the tangent is measured against, which is why it appears twice below.
+    "len": 320,
+
+    // Slither amplitude at the head and at the tail. The original ramps 30*(.25+.75*s),
+    // i.e. a quarter amplitude at the head growing to full at the tail.
+    "ampHead": 7.5,
+    "ampTail": 30.0,
+
+    // Wavelengths along the body, and how fast the wave travels down it.
+    "waves": 11,
+    "waveSpeed": 2,
+
+    // Weight of the second harmonic. It is what stops the slither being a plain sine.
+    "harmonic": 0.15,
+
+    // Body thickness: a tapering tube, plus a Gaussian bulge for the head.
+    "girth": 12,
+    "headBulge": 5,
+    "headAt": 18
+  },
+
+  "vars": [
+    // Station along the spine: 0 at the nose, 1 at the tail tip.
+    { "name": "s", "expr": "i / n" },
+
+    // Across the body, -1 to 1. sin(i) over integer i is equidistributed, and its
+    // arcsine density piles points towards the two flanks -- which is what draws the
+    // snake's outline rather than filling it flat.
+    { "name": "y", "expr": "sin(i)" },
+
+    // Slither amplitude, ramping from head to tail.
+    { "name": "amp", "expr": "ampHead + (ampTail - ampHead) * s" },
+
+    // Thickness. The first term is a tube that tapers to nothing at the tail; the
+    // Gaussian adds the head just behind the nose.
+    { "name": "girths", "expr": "girth * s ^ 0.15 * (1 - s ^ 4) + headBulge * exp(-sq(s * headAt - 1))" },
+
+    // Both of these are per-point constants, so they are hoisted out of the frame loop.
+    { "name": "yR", "expr": "y * girths" },
+    { "name": "slope", "expr": "waves * amp" },
+
+    // --- everything below moves with t ---
+
+    // Phase of the travelling wave at this station.
+    { "name": "p", "expr": "waves * s - t * waveSpeed" },
+
+    // Second harmonic, from the double-angle identities, so the frame loop runs one
+    // sin and one cos rather than four.
+    { "name": "sp", "expr": "sin(p)" },
+    { "name": "cp", "expr": "cos(p)" },
+    { "name": "s2p", "expr": "2 * sp * cp" },
+    { "name": "c2p", "expr": "2 * cp * cp - 1" },
+
+    // The spine's tangent. The original takes g = atan2(slope * (cos p + 2*harmonic *
+    // cos 2p), len) and then uses sin(g) and cos(g) -- but for a known adjacent side
+    // those are just opposite/hypotenuse and adjacent/hypotenuse, so one sqrt replaces
+    // an atan2 and two trig calls. Exactly equal, not an approximation.
+    { "name": "rise", "expr": "slope * (cp + 2 * harmonic * c2p)" },
+    { "name": "hyp", "expr": "mag(rise, len)" },
+    { "name": "sg", "expr": "rise / hyp" },
+    { "name": "cg", "expr": "len / hyp" }
+  ],
+
+  "px": "len * (0.5 - s) - sg * yR",
+  "py": "amp * (sp + harmonic * s2p) + cg * yR",
+
+  "weight": "1"
+}

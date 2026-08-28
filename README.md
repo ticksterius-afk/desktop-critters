@@ -23,9 +23,9 @@ tail, and two texture fields — and nothing else:
 "weight": "(1 - scaleDepth + scaleDepth * scales) * (1 - patchAmount + patchAmount * patch)"
 ```
 
-Four creatures ship — `fish`, `bird`, `jellyfish` and `koi` — and you switch between
-them from the tray menu. `koi` and `jellyfish` are p5.js sketches ported as they were
-written; `fish` and `bird` are built for this engine.
+Five creatures ship — `fish`, `bird`, `jellyfish`, `snake` and `koi` — and you switch
+between them from the tray menu. `koi`, `jellyfish` and `snake` are p5.js sketches
+ported as they were written; `fish` and `bird` are built for this engine.
 
 ---
 
@@ -61,6 +61,7 @@ On first run it writes its editable files to `%APPDATA%\DesktopCritters\`:
    ├─ fish.json           the body formula
    ├─ bird.json
    ├─ jellyfish.json      ported p5.js sketch
+   ├─ snake.json          ported p5.js sketch
    └─ koi.json            ported p5.js sketch
 ```
 
@@ -155,6 +156,29 @@ One consequence to know about: because the whole form sweeps a wide arc over its
 its measured extent is roughly three times the animal at any one instant, and `size`
 measures that swept area. Its suggested `size` is set large to compensate, and the
 creature meanders inside that area — which is most of what makes it read as a jellyfish.
+
+![The snake, ported from p5.js](docs/snake.png)
+
+`snake.json` is a third port. Its spine is a travelling sine with a second harmonic,
+and the body is swept **perpendicular to the spine's own tangent** — which is why the
+thickness stays square to the curve through every bend instead of shearing flat.
+
+It is also where the expression language earned its keep. The sketch computes the
+tangent as `g = atan2(slope * (cos p + 0.3 * cos 2p), len)` and then uses `sin(g)` and
+`cos(g)`. For a right triangle with a known adjacent side those are just
+opposite/hypotenuse and adjacent/hypotenuse, so one `mag()` replaces an `atan2` and two
+trig calls:
+
+```jsonc
+{ "name": "hyp", "expr": "mag(rise, len)" },
+{ "name": "sg",  "expr": "rise / hyp" },
+{ "name": "cg",  "expr": "len / hyp" }
+```
+
+With the double-angle identities folded in too, the frame loop runs one `sin`, one
+`cos` and one `sqrt` where the original ran seven transcendentals. That is an exact
+identity, not an approximation — verified by rendering the literal `atan2` transcription
+alongside and confirming the frames come out byte-identical.
 
 `koi.json` is the original koi sketch, preserved exactly. It is worth keeping and
 worth knowing why it is no longer the default: its layout terms `cos(c)` and
@@ -337,6 +361,7 @@ depends on them:
 | `bird` | `TAU / flapRate` | its one time-varying term is `sin(t * flapRate)` |
 | `koi` | `12 * PI / bodyTurn` | `sin(c / 3)` is its slowest term; `c` carries `-t * bodyTurn / 2` |
 | `jellyfish` | `TAU / driftRate` | `sin(t)` and `cos(d*d - t)` are TAU-periodic, but `c` carries `-t * driftRate` |
+| `snake` | `TAU / waveSpeed` | `p` carries `-t * waveSpeed`; the second harmonic halves that, which divides in |
 
 `loopPeriod` is load-bearing beyond the wrap: the engine measures each creature's
 extent by walking exactly one period. Measuring only a `TAU` slice of the jellyfish's
@@ -495,9 +520,9 @@ the repo carries no binary assets.
 - **`points` changes density, not length.** The original hard-coded `i/663` against
   exactly 20 000 points; dividing by `n` instead keeps the shape identical there while
   making the point count a quality dial.
-- **Four creatures ship**: `fish`, `bird`, `jellyfish`, `koi`. Adding another is a new
-  JSON file dropped into `creatures\` — it appears in the tray menu on the next
-  right-click. No code, no rebuild.
+- **Five creatures ship**: `fish`, `bird`, `jellyfish`, `snake`, `koi`. Adding another
+  is a new JSON file dropped into `creatures\` — it appears in the tray menu on the
+  next right-click. No code, no rebuild.
 - **`size` measures the swept extent, not the instantaneous one.** For creatures whose
   whole body travels over the cycle — the jellyfish especially — the animal looks
   smaller than the number suggests. Set it larger to compensate.
